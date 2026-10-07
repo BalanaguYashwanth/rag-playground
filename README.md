@@ -60,3 +60,10 @@ QDRANT_API_URL = ""
 GOOGLE_API_KEY = ""
 ```
 
+Tasks
+
+- Setup guardrails around LLMs
+- Setup evaluations to measure LLM faithfulness
+- Multi agent evaluation of content uploading to RAG vector db
+- Chat conversation history sync with backend LLM
+

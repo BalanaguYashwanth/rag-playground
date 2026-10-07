@@ -1,0 +1,74 @@
+.iconButton, .retryButton { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 0; background: transparent; color: var(--muted); cursor: pointer; border-radius: 6px; }
+.iconButton { width: 32px; height: 32px; flex-shrink: 0; }
+.iconButton:hover, .retryButton:hover { color: var(--text); background: var(--hover); }
+.emptyState { display: flex; flex-direction: column; align-items: center; padding: 60px 0 48px; text-align: center; animation: appear 450ms ease-out both; }
+.emptyMark { color: var(--accent); margin-bottom: 22px; }
+.eyebrow { font-size: 10px; color: var(--muted); font-weight: 600; margin-bottom: 18px; }
+.emptyState h1 { font-family: Georgia, "Times New Roman", serif; font-weight: 400; font-size: 36px; line-height: 1.25; color: var(--text); text-wrap: balance; }
+.emptySubtitle { color: var(--muted); font-size: 15px; margin-top: 14px; }
+.suggestions { width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 38px; }
+.suggestions button { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--secondary); text-align: left; font-size: 12px; line-height: 1.6; cursor: pointer; transition: background 160ms, border-color 160ms; }
+.suggestions button svg { flex-shrink: 0; color: var(--muted); }
+.suggestions button:hover { border-color: var(--accent-border); background: var(--hover); color: var(--text); }
+.composer { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 18px 18px 12px; transition: border-color 160ms; }
+.composer:focus-within { border-color: var(--accent-border); }
+.composer textarea { width: 100%; min-height: 44px; max-height: 180px; border: 0; resize: none; background: transparent; color: var(--text); font: inherit; font-size: 14px; line-height: 1.65; outline: none; display: block; }
+.composer textarea::placeholder { color: var(--muted); }
+.composerBar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+.composerLabel { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); }
+.smallDot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.sendButton { display: grid; place-items: center; width: 34px; height: 34px; flex-shrink: 0; border: 0; border-radius: 6px; color: #182521; background: var(--accent); cursor: pointer; transition: opacity 150ms; }
+.sendButton:hover { opacity: .85; }
+.sendButton:disabled { background: var(--hover); color: var(--muted); cursor: not-allowed; }
+.turn { padding: 10px 0 36px; animation: appear 250ms ease-out both; }
+.userMessage { width: fit-content; max-width: 88%; margin: 0 0 30px auto; padding: 12px 18px; border-radius: 8px; background: var(--hover); color: var(--text); line-height: 1.7; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.assistantHeader { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; margin-bottom: 16px; }
+.assistantHeader > svg { color: var(--accent); }
+.assistantLabel { font-size: 9px; font-weight: 400; color: var(--muted); margin-left: 3px; }
+.statusTags { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 0 0 18px; }
+.statusTag { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 5px 8px; border: 1px solid var(--border); border-radius: 5px; font-size: 10px; line-height: 1.5; color: var(--muted); animation: appear 200ms ease-out both; }
+.statusTag span { overflow-wrap: anywhere; }
+.statusTag svg { flex-shrink: 0; }
+.activeTag { color: var(--accent); border-color: var(--accent-border); background: var(--accent-soft); }
+.activeTag span { animation: breathe 1.8s ease-in-out infinite; }
+.spinner { animation: spin 1.6s linear infinite; }
+.answer { font-size: 14px; line-height: 1.85; color: var(--secondary); overflow-wrap: anywhere; }
+.answer > * + * { margin-top: 16px; }
+.answer h1, .answer h2, .answer h3, .answer h4, .answer h5, .answer h6 { color: var(--text); font-weight: 600; line-height: 1.45; font-size: 17px; }
+.answer ul, .answer ol { padding-left: 22px; }
+.answer li + li { margin-top: 6px; }
+.answer strong { color: var(--text); font-weight: 600; }
+.answer a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.answer code { font-family: var(--font-geist-mono), monospace; font-size: 12px; background: var(--hover); border-radius: 4px; padding: 2px 5px; }
+.answer pre { max-width: 100%; overflow-x: auto; padding: 16px; background: var(--sidebar); border: 1px solid var(--border); border-radius: 6px; }
+.answer pre code { background: transparent; padding: 0; }
+.answer blockquote { padding-left: 16px; border-left: 2px solid var(--accent-border); color: var(--muted); }
+.answer img { max-width: 100%; height: auto; }
+.answer hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
+.streamingAnswer > :last-child::after { content: ""; display: inline-block; width: 6px; height: 14px; margin-left: 4px; vertical-align: middle; background: var(--accent); animation: breathe 1s ease-in-out infinite; }
+.thinking { display: flex; align-items: center; gap: 5px; height: 22px; }
+.thinking span { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: breathe 1.4s infinite; }
+.thinking span:nth-child(2) { animation-delay: 180ms; }
+.thinking span:nth-child(3) { animation-delay: 360ms; }
+.error { display: flex; align-items: flex-start; gap: 9px; padding: 12px 0; color: var(--error); font-size: 13px; line-height: 1.7; }
+.error svg { flex-shrink: 0; margin-top: 3px; }
+.stopped { color: var(--muted); font-size: 12px; line-height: 1.7; }
+.messageActions { display: flex; gap: 8px; align-items: center; margin-top: 14px; }
+.retryButton { padding: 8px 10px; font-size: 12px; }
+.retryButton:disabled { opacity: .5; cursor: not-allowed; }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes breathe { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+@keyframes appear { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 600px) {
+  .emptyState { padding-top: 36px; padding-bottom: 28px; }
+  .emptyState h1 { font-size: 28px; }
+  .suggestions { grid-template-columns: 1fr; gap: 8px; margin-top: 28px; }
+  .suggestions button { padding: 11px 14px; }
+  .assistantLabel { display: none; }
+  .composer { padding: 14px 14px 10px; }
+  .userMessage { max-width: 94%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .emptyState, .turn, .statusTag, .activeTag span, .spinner, .thinking span, .streamingAnswer > :last-child::after { animation: none; }
+}

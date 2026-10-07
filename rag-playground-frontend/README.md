@@ -1,37 +1,51 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# RAG Playground Frontend
 
-## Getting Started
+A document chat interface built with Next.js, React, and TypeScript. It uses a default soft-charcoal theme, streamed Markdown answers, and animated retrieval status tags.
 
-First, run the development server:
+## Development
+
+Run commands from this directory:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Set the backend origin in `.env.local` (or the existing `.env`):
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```dotenv
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Restart the frontend after changing environment variables. Start the backend separately and allow the frontend origin in its CORS configuration. The frontend runs at [http://localhost:3000](http://localhost:3000).
 
-## Learn More
+## Structure
 
-To learn more about Next.js, take a look at the following resources:
+- `src/api.ts`: SSE connection, runtime event validation, and readable request errors.
+- `src/hooks/use-chat.ts`: per-message request state, cancellation, retry, and conversation reset.
+- `src/components/chat/`: composer, message, empty state, and status tags with scoped styles.
+- `src/app/page.tsx`: workspace layout and scroll-aware conversation view.
+- `tests/api.test.mjs`: dependency-free Node tests using the existing TypeScript compiler and real SSE parser.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Stream Contract
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The frontend posts `{ "query": "..." }` to `/rag/search` and expects `text/event-stream`. Each `status` event contains a JSON payload:
 
-## Deploy on Vercel
+```json
+{ "type": "tag", "stage": "searching", "message": "Searching documents" }
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Status tags support `searching`, `retrieved`, `generating`, and `done`. Answer chunks use `{ "stage": "response", "message": "..." }`. A non-tag `done` event supports the backend's no-data result. A `done` event must precede a normal connection close; early disconnects are treated as incomplete answers.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-# rag-playground
+HTTP errors, invalid data, backend `error` events, and 60 seconds without an event produce a recoverable error without discarding partial text. Failed POST requests are not automatically retried. Retry is explicit; stopping a response is not an error.
+
+Conversations are kept in memory only. Refreshing clears them; starting a new conversation cancels the active request and clears the messages and draft. The workspace document label and suggested questions reflect the bundled solar-system dataset, not a live document inventory.
+
+## Checks
+
+```bash
+pnpm test
+pnpm lint
+pnpm exec tsc --noEmit
+pnpm build
+```
