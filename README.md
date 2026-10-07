@@ -60,10 +60,10 @@ QDRANT_API_URL = ""
 GOOGLE_API_KEY = ""
 ```
 
-Tasks
+## Next Phase Rollouts
 
 - Setup guardrails around LLMs
 - Setup evaluations to measure LLM faithfulness
-- Multi agent evaluation of content uploading to RAG vector db
+- Multi agent evaluation for content moderation
 - Chat conversation history sync with backend LLM
 
