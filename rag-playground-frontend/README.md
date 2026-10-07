@@ -29,17 +29,33 @@ Restart the frontend after changing environment variables. Start the backend sep
 
 ## Stream Contract
 
-The frontend posts `{ "query": "..." }` to `/rag/search` and expects `text/event-stream`. Each `status` event contains a JSON payload:
+The frontend first presents three mutually exclusive document sources: custom
+text (at least 100 lines), a PDF, or a quick template. Custom text and PDFs are
+limited to 1 MiB (1,048,576 bytes). PDF contents are not read or parsed in the
+browser; the original `File` is uploaded directly. Custom text is wrapped in a
+UTF-8 `.txt` file. Selecting a template immediately builds it.
+
+`POST /rag/build` uses `FormData` containing `file`, `user_id`, and `source`.
+The browser supplies the multipart boundary. A `user_<UUID v4>` is kept in
+session storage (or memory when storage is unavailable); the backend returns
+a document UUID. Only one build runs at a time, with a five-minute client timeout.
+The composer appears after a successful build. The header's document button
+clears the current conversation and returns to document selection.
+
+The frontend posts `{ "query": "...", "user_id": "user_<uuid>", "document_id": "<uuid>" }` to `/rag/search` and expects `text/event-stream`. Each `status` event contains a JSON payload:
 
 ```json
 { "type": "tag", "stage": "searching", "message": "Searching documents" }
 ```
 
-Status tags support `searching`, `retrieved`, `generating`, and `done`. Answer chunks use `{ "stage": "response", "message": "..." }`. A non-tag `done` event supports the backend's no-data result. A `done` event must precede a normal connection close; early disconnects are treated as incomplete answers.
+Status tags support `searching`, `retrieved`, `generating`, and `done`; only the latest stage is displayed. Answer chunks use `{ "stage": "response", "message": "..." }`. A non-tag `done` event supports the backend's no-data result. A `done` event must precede a normal connection close; early disconnects are treated as incomplete answers.
 
 HTTP errors, invalid data, backend `error` events, and 60 seconds without an event produce a recoverable error without discarding partial text. Failed POST requests are not automatically retried. Retry is explicit; stopping a response is not an error.
 
-Conversations are kept in memory only. Refreshing clears them; starting a new conversation cancels the active request and clears the messages and draft. The workspace document label and suggested questions reflect the bundled solar-system dataset, not a live document inventory.
+Conversations and active document context are kept in memory only. Refreshing
+returns to document selection. UUID creation requires HTTPS or localhost and a
+modern browser. The UUID filters separate retrieval scopes, but are not an
+authentication or authorization mechanism.
 
 ## Checks
 

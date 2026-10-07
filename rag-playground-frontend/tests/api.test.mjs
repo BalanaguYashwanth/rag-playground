@@ -7,6 +7,7 @@ import { runInNewContext } from "node:vm";
 import ts from "typescript";
 
 const require = createRequire(import.meta.url);
+const documentContext = { user_id: "user_550e8400-e29b-41d4-a716-446655440000", document_id: "550e8400-e29b-41d4-a716-446655440001", filename: "notes.txt" };
 const filename = fileURLToPath(new URL("../src/api.ts", import.meta.url));
 const source = ts.transpileModule(readFileSync(filename, "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -34,6 +35,10 @@ function loadApi(fetch, apiUrl = "http://localhost:8000", timeout = false) {
     require: () => dependencyExports,
     process: { env: { NEXT_PUBLIC_API_URL: apiUrl } },
     AbortController,
+    fetch,
+    Blob,
+    File,
+    FormData,
     setTimeout: schedule,
     clearTimeout: cancel,
   }, { filename });
@@ -74,9 +79,9 @@ test("streams split SSE frames, preserves tokens, and sends the query", async ()
   });
   try {
     const events = [];
-    await api.rag_search("question", (_name, data) => events.push(data));
+    await api.rag_search("question", (_name, data) => events.push(data), documentContext);
     assert.equal(request.url, "http://localhost:8000/rag/search");
-    assert.deepEqual(JSON.parse(request.options.body), { query: "question" });
+    assert.deepEqual(JSON.parse(request.options.body), { query: "question", user_id: documentContext.user_id, document_id: documentContext.document_id });
     assert.equal(events.filter((data) => data.stage === "response").map((data) => data.message).join(""), "Hello world");
     assert.equal(events.at(-1).stage, "done");
   } finally { dispose(); }
@@ -86,7 +91,7 @@ test("supports the backend's no-data completion event", async () => {
   const { api, dispose } = loadApi(async () => stream(event({ stage: "done", message: "No data found" })));
   try {
     let answer;
-    await api.rag_search("question", (_name, data) => { answer = data.message; });
+    await api.rag_search("question", (_name, data) => { answer = data.message; }, documentContext);
     assert.equal(answer, "No data found");
   } finally { dispose(); }
 });
@@ -104,7 +109,7 @@ for (const [name, response, expected] of [
     let requests = 0;
     const { api, dispose } = loadApi(async () => { requests += 1; return response(); });
     try {
-      await assert.rejects(api.rag_search("question", () => {}), expected);
+      await assert.rejects(api.rag_search("question", () => {}, documentContext), expected);
       assert.equal(requests, 1);
     } finally { dispose(); }
   });
@@ -113,7 +118,7 @@ for (const [name, response, expected] of [
 test("reports missing configuration before fetching", async () => {
   const { api, dispose } = loadApi(() => assert.fail("Should not fetch"), "");
   try {
-    await assert.rejects(api.rag_search("question", () => {}), /NEXT_PUBLIC_API_URL/);
+    await assert.rejects(api.rag_search("question", () => {}, documentContext), /NEXT_PUBLIC_API_URL/);
   } finally { dispose(); }
 });
 
@@ -124,7 +129,7 @@ test("user cancellation completes without an error", async () => {
     return stream("");
   });
   try {
-    await api.rag_search("question", () => {}, controller.signal);
+    await api.rag_search("question", () => {}, documentContext, controller.signal);
     assert.equal(controller.signal.aborted, true);
   } finally { dispose(); }
 });
@@ -132,6 +137,150 @@ test("user cancellation completes without an error", async () => {
 test("times out an unresponsive backend", async () => {
   const { api, dispose } = loadApi(() => new Promise(() => {}), "http://localhost:8000", true);
   try {
-    await assert.rejects(api.rag_search("question", () => {}), /stopped responding/);
+    await assert.rejects(api.rag_search("question", () => {}, documentContext), /stopped responding/);
   } finally { dispose(); }
+});
+
+test("uploads one multipart file with user scope and source", async () => {
+  let request;
+  const { api, dispose } = loadApi(async (url, options) => {
+    request = { url, options };
+    return Response.json(documentContext);
+  });
+  try {
+    const file = new File(["Document facts"], "notes.txt", { type: "text/plain" });
+    const result = await api.buildDocument(file, documentContext.user_id, "template");
+    assert.equal(result.document_id, documentContext.document_id);
+    assert.equal(request.url, "http://localhost:8000/rag/build");
+    assert.equal(request.options.headers, undefined);
+    assert.equal(request.options.body.getAll("file").length, 1);
+    assert.equal(request.options.body.get("user_id"), documentContext.user_id);
+    assert.equal(request.options.body.get("source"), "template");
+    assert.equal(request.options.body.get("file").name, "notes.txt");
+  } finally { dispose(); }
+});
+
+test("rejects oversized documents before uploading", async () => {
+  const { api, dispose } = loadApi(() => assert.fail("Should not upload"));
+  try {
+    const file = new File([new Uint8Array(1024 * 1024 + 1)], "large.pdf");
+    await assert.rejects(api.buildDocument(file, documentContext.user_id, "pdf"), /1 MiB/);
+  } finally { dispose(); }
+});
+
+test("measures UTF-8 bytes and lines without counting trailing newlines", () => {
+  const { api, dispose } = loadApi();
+  try {
+    assert.equal(api.measureText("\u00e9").bytes, 2);
+    assert.equal(api.measureText("first\r\nsecond\n").lines, 2);
+    assert.equal(api.measureText("").lines, 0);
+    assert.equal(api.measureText("line\n".repeat(100)).lines, 100);
+  } finally { dispose(); }
+});
+
+test("reports build errors and rejects another user's session", async () => {
+  for (const [response, expected] of [
+    [Response.json({ detail: "Document exceeds 1 MiB." }, { status: 413 }), /exceeds 1 MiB/],
+    [Response.json({ ...documentContext, user_id: "user_other" }), /invalid document session/],
+  ]) {
+    const { api, dispose } = loadApi(async () => response);
+    try {
+      await assert.rejects(api.buildDocument(new File(["facts"], "notes.txt"), documentContext.user_id, "template"), expected);
+    } finally { dispose(); }
+  }
+});
+
+test("status UI renders only the latest stage", () => {
+  const component = ts.transpileModule(readFileSync(new URL("../src/components/chat/status-tags.tsx", import.meta.url), "utf8"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText;
+  const exports = {};
+  runInNewContext(component, { exports, require: (name) => name.endsWith(".css") ? { default: { statusTag: "status-tag", spinner: "spinner" } } : require(name) });
+  const { createElement } = require("react");
+  const { renderToStaticMarkup } = require("react-dom/server");
+  const stages = [];
+  for (const stage of ["searching", "retrieved", "generating", "done"]) {
+    stages.push({ stage, message: `Stage ${stage}` });
+    const html = renderToStaticMarkup(createElement(exports.StatusTags, { turn: { stages, state: stage === "done" ? "complete" : "streaming" } }));
+    assert.equal((html.match(/class="status-tag/g) ?? []).length, 1);
+    assert.ok(html.includes(`Stage ${stage}`));
+    for (const previous of stages.slice(0, -1)) assert.ok(!html.includes(previous.message));
+  }
+});
+
+function loadChat() {
+  const source = ts.transpileModule(readFileSync(new URL("../src/hooks/use-chat.ts", import.meta.url), "utf8"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const exports = {};
+  const states = [];
+  const requests = [];
+  const react = {
+    useEffect() {},
+    useRef: (current) => ({ current }),
+    useState: (initial) => {
+      const index = states.length;
+      states.push(initial);
+      return [initial, (update) => { states[index] = typeof update === "function" ? update(states[index]) : update; }];
+    },
+  };
+  const api = {
+    getErrorMessage: () => "Request failed",
+    rag_search: async (question, onEvent, document) => {
+      requests.push({ question, document });
+      onEvent("status", { stage: "response", message: "Document answer" });
+      onEvent("status", { type: "tag", stage: "done", message: "Complete" });
+    },
+  };
+  runInNewContext(source, {
+    exports, AbortController, crypto: require("node:crypto").webcrypto,
+    require: (name) => name === "react" ? react : name === "@/api" ? api : require(name),
+  });
+  return { exports, states, requests };
+}
+
+test("recognizes greeting-only messages, punctuation, and repeated letters", () => {
+  const { exports } = loadChat();
+  for (const message of ["hi", "HELLO!!!", "Hola", "hey there", "good morning", "what's up?", "hiiii", "helloooo", "hi \u{1f44b}"]) {
+    assert.match(exports.getGreetingResponse(message), /Hello, welcome/, message);
+  }
+  for (const message of ["bye", "goodbye!", "byeee", "see you later", "good night"]) {
+    assert.match(exports.getGreetingResponse(message), /Goodbye/, message);
+  }
+});
+
+test("handles conservative greeting typos without swallowing document questions", () => {
+  const { exports } = loadChat();
+  for (const message of ["helo", "helllo", "hellp", "welcom", "goodby", "good mornng"]) {
+    assert.ok(exports.getGreetingResponse(message), message);
+  }
+  for (const message of ["", "help", "history", "halo", "hi, what is RAG?", "hello explain Saturn", "bye what are comets", "what does hello mean", "summarize my document", "hi " + "document ".repeat(20)]) {
+    assert.equal(exports.getGreetingResponse(message), null, message);
+  }
+});
+
+test("greetings create completed turns without backend requests or streaming", async () => {
+  const { exports, states, requests } = loadChat();
+  const chat = exports.useChat(documentContext);
+  await chat.send("helo!");
+  assert.equal(requests.length, 0);
+  assert.equal(states[0].length, 1);
+  assert.equal(states[0][0].state, "complete");
+  assert.equal(states[0][0].stages.length, 0);
+  assert.match(states[0][0].answer, /Hello, welcome/);
+  assert.equal(states[1], false);
+  await chat.send("bye");
+  assert.match(states[0][1].answer, /Goodbye/);
+  assert.equal(requests.length, 0);
+});
+
+test("greeting-prefixed questions still reach scoped retrieval", async () => {
+  const { exports, states, requests } = loadChat();
+  const chat = exports.useChat(documentContext);
+  await chat.send("Hi, what makes Saturn's rings unique?");
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].document.document_id, documentContext.document_id);
+  assert.equal(states[0][0].answer, "Document answer");
+  assert.equal(states[0][0].state, "complete");
+  assert.equal(states[1], false);
 });

@@ -1,10 +1,12 @@
 import os, logging
-from langchain_unstructured import UnstructuredLoader
+from functools import lru_cache
+from threading import Lock
 from langchain.chat_models import init_chat_model
+from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
-from qdrant_client.models import VectorParams, Distance
+from qdrant_client.models import VectorParams, Distance, Filter, FieldCondition, MatchValue, PayloadSchemaType
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from dotenv import load_dotenv
 load_dotenv()
@@ -17,9 +19,14 @@ QDRANT_API_KEY = str(os.getenv('QDRANT_API_KEY'))
 GOOGLE_API_KEY = str(os.getenv('GOOGLE_API_KEY'))
 
 client = QdrantClient(
-    api_key="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIiwic3ViamVjdCI6ImFwaS1rZXk6N2UzZTM1ZTAtMGMzZC00Y2M1LWIwNDAtNzgxNDIwZGM5YWIyIn0.k94VixO-e41RSS93PsIubhPE7cAQUtf0W6jvUnrFUTs",
-    url="https://06960eb1-a974-4825-9b59-6e27d1e87ff9.us-central1-0.gcp.cloud.qdrant.io"
+    api_key=QDRANT_API_KEY,
+    url=QDRANT_API_URL
 )
+build_lock = Lock()
+
+@lru_cache(maxsize=1)
+def get_embeddings():
+    return HuggingFaceEmbeddings()
 
 def main():
     print("Hello from rag-playground!")
@@ -42,21 +49,29 @@ def rag_steps():
     pass
 
 
-def create_rag():
-    try:
-        documents = UnstructuredLoader(["/Users/yashwanth/other-projects/AI_ML/rag_playground/data/solar_system_wiki.txt"])
-        documents = documents.load()
+def create_rag(text: str, user_id: str, document_id: str, filename: str):
+    with build_lock:
+        documents = [Document(page_content=text, metadata={
+            "user_id": user_id, "document_id": document_id, "source": filename,
+        })]
         splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50) # What should be the ideal size of chunk ?
         chunks = splitter.split_documents(documents)
-        
-        embeddings_model = HuggingFaceEmbeddings()
+
+        embeddings_model = get_embeddings()
         if not client.collection_exists(EMBEDDINGS_COLLECTION_NAME):
             client.create_collection(
                 collection_name=EMBEDDINGS_COLLECTION_NAME, 
                 vectors_config=VectorParams(
-                    size=768,
+                    size=len(embeddings_model.embed_query("dimension check")),
                     distance=Distance.COSINE
                 )
+            )
+        for field in ("metadata.user_id", "metadata.document_id"):
+            client.create_payload_index(
+                collection_name=EMBEDDINGS_COLLECTION_NAME,
+                field_name=field,
+                field_schema=PayloadSchemaType.KEYWORD,
+                wait=True,
             )
 
         collection = QdrantVectorStore(
@@ -65,21 +80,23 @@ def create_rag():
                 embedding=embeddings_model
             )
 
-        collection.add_documents(chunks)
-    except:
-        raise
+        for offset in range(0, len(chunks), 32):
+            collection.add_documents(chunks[offset:offset + 32])
 
-def rag_search(input:str):
+def rag_search(input: str, user_id: str, document_id: str):
     try:
         if not input:
             raise ValueError('User input is required')
-        embedding_model = HuggingFaceEmbeddings()
+        embedding_model = get_embeddings()
         vector_store = QdrantVectorStore(
             client=client,
             collection_name=EMBEDDINGS_COLLECTION_NAME,
             embedding=embedding_model
         )
-        results = vector_store.similarity_search(input, k=2)
+        results = vector_store.similarity_search(input, k=2, filter=Filter(must=[
+            FieldCondition(key="metadata.user_id", match=MatchValue(value=user_id)),
+            FieldCondition(key="metadata.document_id", match=MatchValue(value=document_id)),
+        ]))
         rag_search_result = []
         for result in results:
             rag_search_result.append(result.page_content)

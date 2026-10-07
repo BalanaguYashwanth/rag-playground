@@ -6,6 +6,8 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi[standard]>=0.142.2",
+    "python-multipart>=0.0.20",
+    "pypdf>=6.0.0",
     "langchain>=1.4.3",
     "langchain-community>=0.4.2",
     "langchain-google-genai>=4.4.0",

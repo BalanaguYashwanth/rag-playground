@@ -1,5 +1,22 @@
 import { fetchEventSource } from "@microsoft/fetch-event-source";
 
+export const MAX_DOCUMENT_BYTES = 1024 * 1024;
+export type DocumentSource = "custom" | "pdf" | "template";
+export type DocumentContext = { user_id: string; document_id: string; filename: string };
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+export function measureText(text: string) {
+  let lines = text.length ? 1 : 0;
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === "\r") {
+      lines += 1;
+      if (text[index + 1] === "\n") index += 1;
+    } else if (text[index] === "\n") lines += 1;
+  }
+  if (text.endsWith("\n") || text.endsWith("\r")) lines -= 1;
+  return { lines, bytes: new Blob([text]).size };
+}
+
 export type RagStage = "searching" | "retrieved" | "generating" | "done";
 
 export type RagEvent =
@@ -35,9 +52,52 @@ export function getErrorMessage(error: unknown): string {
   return "Couldn't reach the server. Check your connection and try again.";
 }
 
+export async function buildDocument(
+  file: File, userId: string, source: DocumentSource, signal?: AbortSignal,
+): Promise<DocumentContext> {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+  if (!apiUrl) throw new RagRequestError("The backend isn't configured. Set NEXT_PUBLIC_API_URL and restart the frontend.");
+  if (!file.size || file.size > MAX_DOCUMENT_BYTES) throw new RagRequestError("Choose a nonempty document no larger than 1 MiB.");
+  if (!(source === "pdf" ? /\.pdf$/i : /\.txt$/i).test(file.name)) throw new RagRequestError("The file type does not match the selected source.");
+  if (!userId.startsWith("user_") || !uuidPattern.test(userId.slice(5))) throw new RagRequestError("Invalid user session. Please refresh the page.");
+  const form = new FormData();
+  form.append("file", file);
+  form.append("user_id", userId);
+  form.append("source", source);
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) controller.abort();
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 300_000);
+  try {
+    const response = await fetch(`${apiUrl.replace(/\/$/, "")}/rag/build`, {
+      method: "POST", body: form, signal: controller.signal,
+    });
+    const data: unknown = await response.json().catch(() => null);
+    if (!response.ok) {
+      const detail = data && typeof data === "object" && "detail" in data && typeof data.detail === "string" ? data.detail : "Could not build this document. Please try again.";
+      throw new RagRequestError(detail);
+    }
+    if (!data || typeof data !== "object" || !("user_id" in data) || data.user_id !== userId ||
+        !("document_id" in data) || typeof data.document_id !== "string" || !uuidPattern.test(data.document_id) ||
+        !("filename" in data) || typeof data.filename !== "string") {
+      throw new RagRequestError("The server returned an invalid document session.");
+    }
+    return { user_id: userId, document_id: data.document_id, filename: data.filename };
+  } catch (error) {
+    if (timedOut) throw new RagRequestError("Building the document timed out. Please try again.");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
+  }
+}
+
 export async function rag_search(
   input: string,
   onEvent: (event: string, data: RagEvent) => void,
+  document: DocumentContext,
   signal?: AbortSignal,
 ): Promise<void> {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL;
@@ -63,7 +123,7 @@ export async function rag_search(
     await fetchEventSource(`${apiUrl.replace(/\/$/, "")}/rag/search`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify({ query: input }),
+      body: JSON.stringify({ query: input, user_id: document.user_id, document_id: document.document_id }),
       signal: controller.signal,
       openWhenHidden: true,
       async onopen(response) {

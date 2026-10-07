@@ -23,6 +23,12 @@
   .breadcrumb > :last-child { color: var(--secondary); }
   .divider { opacity: .45; }
   .headerBadge { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
+  .headerTools { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .headerBadge > span { max-width: 220px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .headerBadge svg { flex-shrink: 0; }
+  .documentButton { display: grid; place-items: center; flex-shrink: 0; width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 6px; color: var(--secondary); background: transparent; cursor: pointer; }
+  .documentButton:hover { color: var(--text); background: var(--hover); }
+  .documentButton:disabled { opacity: .4; }
   .mobileNewChat { display: none; width: 32px; height: 32px; border: 0; border-radius: 6px; background: transparent; color: var(--secondary); cursor: pointer; }
   .conversation { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding: 0 28px; }
   .conversationInner { max-width: 720px; width: 100%; min-height: 100%; margin: 0 auto; }
