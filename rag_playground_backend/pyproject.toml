@@ -1,0 +1,18 @@
+[project]
+name = "rag-playground"
+version = "0.1.0"
+description = "Playground to play with rag using langchain"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi[standard]>=0.142.2",
+    "langchain>=1.4.3",
+    "langchain-community>=0.4.2",
+    "langchain-google-genai>=4.4.0",
+    "langchain-huggingface>=1.2.2",
+    "langchain-qdrant>=1.1.0",
+    "langchain-unstructured>=1.0.1",
+    "sentence-transformers>=6.1.0",
+    "torch<2.10",
+    "unstructured>=0.27.10",
+]
