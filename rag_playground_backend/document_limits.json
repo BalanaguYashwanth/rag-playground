@@ -1,0 +1,5 @@
+{
+  "max_document_bytes": 1048576,
+  "min_custom_text_lines": 50,
+  "max_pdf_pages": 100
+}

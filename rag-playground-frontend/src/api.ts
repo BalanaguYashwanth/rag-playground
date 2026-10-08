@@ -1,6 +1,11 @@
 import { fetchEventSource } from "@microsoft/fetch-event-source";
+import { config_document_limits } from "./document_limits";
 
-export const MAX_DOCUMENT_BYTES = 1024 * 1024;
+const documentLimits = config_document_limits;
+export const MAX_DOCUMENT_BYTES = documentLimits.max_document_bytes;
+export const MIN_CUSTOM_TEXT_LINES = documentLimits.min_custom_text_lines;
+export const MAX_PDF_PAGES = documentLimits.max_pdf_pages;
+export const MAX_DOCUMENT_SIZE_LABEL = `${MAX_DOCUMENT_BYTES / (1024 * 1024)} MiB`;
 export type DocumentSource = "custom" | "pdf" | "template";
 export type DocumentContext = { user_id: string; document_id: string; filename: string };
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -57,9 +62,22 @@ export async function buildDocument(
 ): Promise<DocumentContext> {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL;
   if (!apiUrl) throw new RagRequestError("The backend isn't configured. Set NEXT_PUBLIC_API_URL and restart the frontend.");
-  if (!file.size || file.size > MAX_DOCUMENT_BYTES) throw new RagRequestError("Choose a nonempty document no larger than 1 MiB.");
+  if (!file.size || file.size > MAX_DOCUMENT_BYTES) throw new RagRequestError(`Choose a nonempty document no larger than ${MAX_DOCUMENT_SIZE_LABEL}.`);
   if (!(source === "pdf" ? /\.pdf$/i : /\.txt$/i).test(file.name)) throw new RagRequestError("The file type does not match the selected source.");
   if (!userId.startsWith("user_") || !uuidPattern.test(userId.slice(5))) throw new RagRequestError("Invalid user session. Please refresh the page.");
+  if (source !== "pdf") {
+    const bytes = await file.arrayBuffer();
+    let text: string;
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      throw new RagRequestError("Text files must use UTF-8 encoding.");
+    }
+    if (!text.trim() || text.includes("\x00")) throw new RagRequestError("Document must contain readable text.");
+    if (source === "custom" && measureText(text).lines < MIN_CUSTOM_TEXT_LINES) {
+      throw new RagRequestError(`Text must contain at least ${MIN_CUSTOM_TEXT_LINES} lines.`);
+    }
+  }
   const form = new FormData();
   form.append("file", file);
   form.append("user_id", userId);
