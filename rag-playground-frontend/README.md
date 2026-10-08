@@ -30,10 +30,19 @@ Restart the frontend after changing environment variables. Start the backend sep
 ## Stream Contract
 
 The frontend first presents three mutually exclusive document sources: custom
-text (at least 100 lines), a PDF, or a quick template. Custom text and PDFs are
+text (at least 50 lines), a PDF, or a quick template. All document sources are
 limited to 1 MiB (1,048,576 bytes). PDF contents are not read or parsed in the
 browser; the original `File` is uploaded directly. Custom text is wrapped in a
 UTF-8 `.txt` file. Selecting a template immediately builds it.
+
+Frontend document limits come from the `config_document_limits` export in
+`src/document_limits.ts`: `max_document_bytes`, `min_custom_text_lines`, and
+`max_pdf_pages`. Edit that export and rebuild/restart the frontend to change its
+limits. Frontend builds do not need the backend directory. Backend limits are
+configured separately and still enforced by the API; keep the values aligned.
+Labels and validation use the same frontend values; custom/template text is
+checked for readable UTF-8 before upload. PDF contents are validated by the
+backend before indexing.
 
 `POST /rag/build` uses `FormData` containing `file`, `user_id`, and `source`.
 The browser supplies the multipart boundary. A `user_<UUID v4>` is kept in

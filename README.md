@@ -64,6 +64,7 @@ GOOGLE_API_KEY = ""
 
 - Setup guardrails around LLMs
 - Setup evaluations to measure LLM faithfulness
+- Setup cache to save token cost for LLMs
 - Multi agent evaluation for content moderation
 - Chat conversation history sync with backend LLM
 

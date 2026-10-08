@@ -7,6 +7,11 @@ import { runInNewContext } from "node:vm";
 import ts from "typescript";
 
 const require = createRequire(import.meta.url);
+const documentLimits = {};
+const documentLimitsSource = ts.transpileModule(readFileSync(new URL("../src/document_limits.ts", import.meta.url), "utf8"), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText;
+runInNewContext(documentLimitsSource, { exports: documentLimits });
 const documentContext = { user_id: "user_550e8400-e29b-41d4-a716-446655440000", document_id: "550e8400-e29b-41d4-a716-446655440001", filename: "notes.txt" };
 const filename = fileURLToPath(new URL("../src/api.ts", import.meta.url));
 const source = ts.transpileModule(readFileSync(filename, "utf8"), {
@@ -32,13 +37,14 @@ function loadApi(fetch, apiUrl = "http://localhost:8000", timeout = false) {
   });
   runInNewContext(source, {
     exports,
-    require: () => dependencyExports,
+    require: (name) => name === "./document_limits" ? documentLimits : dependencyExports,
     process: { env: { NEXT_PUBLIC_API_URL: apiUrl } },
     AbortController,
     fetch,
     Blob,
     File,
     FormData,
+    TextDecoder,
     setTimeout: schedule,
     clearTimeout: cancel,
   }, { filename });
@@ -163,7 +169,7 @@ test("uploads one multipart file with user scope and source", async () => {
 test("rejects oversized documents before uploading", async () => {
   const { api, dispose } = loadApi(() => assert.fail("Should not upload"));
   try {
-    const file = new File([new Uint8Array(1024 * 1024 + 1)], "large.pdf");
+    const file = new File([new Uint8Array(api.MAX_DOCUMENT_BYTES + 1)], "large.pdf");
     await assert.rejects(api.buildDocument(file, documentContext.user_id, "pdf"), /1 MiB/);
   } finally { dispose(); }
 });
@@ -174,7 +180,32 @@ test("measures UTF-8 bytes and lines without counting trailing newlines", () => 
     assert.equal(api.measureText("\u00e9").bytes, 2);
     assert.equal(api.measureText("first\r\nsecond\n").lines, 2);
     assert.equal(api.measureText("").lines, 0);
-    assert.equal(api.measureText("line\n".repeat(100)).lines, 100);
+    assert.equal(api.measureText("line\n".repeat(50)).lines, 50);
+  } finally { dispose(); }
+});
+
+test("custom text requires 50 lines before uploading", async () => {
+  let uploads = 0;
+  const { api, dispose } = loadApi(async () => { uploads += 1; return Response.json(documentContext); });
+  try {
+    assert.equal(api.MIN_CUSTOM_TEXT_LINES, 50);
+    const short = new File(["line\n".repeat(49)], "notes.txt");
+    await assert.rejects(api.buildDocument(short, documentContext.user_id, "custom"), /at least 50 lines/);
+    assert.equal(uploads, 0);
+    const valid = new File(["line\n".repeat(50)], "notes.txt");
+    await api.buildDocument(valid, documentContext.user_id, "custom");
+    assert.equal(uploads, 1);
+  } finally { dispose(); }
+});
+
+test("custom and template text reject invalid content before uploading", async () => {
+  const { api, dispose } = loadApi(() => assert.fail("Should not upload"));
+  try {
+    for (const source of ["custom", "template"]) {
+      for (const [content, expected] of [[" \n ", /readable text/], ["facts\x00", /readable text/], [new Uint8Array([255]), /UTF-8/]]) {
+        await assert.rejects(api.buildDocument(new File([content], "notes.txt"), documentContext.user_id, source), expected);
+      }
+    }
   } finally { dispose(); }
 });
 
@@ -238,6 +269,47 @@ function loadChat() {
   });
   return { exports, states, requests };
 }
+
+test("chat composer caps input at 50 words and 313 characters", () => {
+  const component = ts.transpileModule(readFileSync(new URL("../src/components/chat/chat-composer.tsx", import.meta.url), "utf8"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText;
+  const exports = {};
+  let input = "";
+  const sent = [];
+  const react = {
+    useState: () => [input, (value) => { input = value; }],
+    useRef: () => ({ current: null }),
+  };
+  runInNewContext(component, {
+    exports,
+    require: (name) => name === "react" ? react : name.endsWith(".css") ? { default: {} } : require(name),
+  });
+  const render = (isStreaming = false) => exports.ChatComposer({ isStreaming, onSend: (question) => sent.push(question), onStop() {} });
+  const change = (value) => render().props.children[0].props.onChange({ target: { value, style: {}, scrollHeight: 40 } });
+  assert.equal(render().props.children[0].props.maxLength, 313);
+  change("a".repeat(314));
+  assert.equal(input, "a".repeat(313));
+  render().props.onSubmit({ preventDefault() {} });
+  assert.equal(sent.at(-1), "a".repeat(313));
+  assert.equal(input, "");
+  for (const separator of [" ", "\n", "\t", "  "]) {
+    const words = Array.from({ length: 50 }, () => "word").join(separator);
+    change(words);
+    assert.equal(input, words);
+    change(`${words}${separator}extra`);
+    assert.equal(input, words);
+  }
+  render(true).props.onSubmit({ preventDefault() {} });
+  assert.equal(sent.length, 1);
+  render().props.onSubmit({ preventDefault() {} });
+  assert.equal(sent.at(-1).match(/\S+/g).length, 50);
+  for (const invalid of ["a".repeat(314), "word ".repeat(51), " \n "]) {
+    input = invalid;
+    render().props.onSubmit({ preventDefault() {} });
+    assert.equal(sent.length, 2);
+  }
+});
 
 test("recognizes greeting-only messages, punctuation, and repeated letters", () => {
   const { exports } = loadChat();
