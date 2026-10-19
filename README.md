@@ -62,9 +62,12 @@ GOOGLE_API_KEY = ""
 
 ## Next Phase Rollouts
 
-- Setup guardrails around LLMs
+- Setup guardrails & evals around LLMs
+- Embedding versioning
 - Setup evaluations to measure LLM faithfulness
 - Setup cache to save token cost for LLMs
 - Multi agent evaluation for content moderation
 - Chat conversation history sync with backend LLM
-
+- Multimodal embeddings & RAG pipeline
+- Create agent memory that can learn from user conversation
+- most companies follow html output rather string output - research it
