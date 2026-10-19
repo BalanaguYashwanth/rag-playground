@@ -61,7 +61,8 @@ export default function Home() {
     <>
       {cloudflareDown && <TemporaryDown />}
     <div className={styles.page} hidden={cloudflareDown} style={cloudflareDown ? { display: "none" } : undefined}>
-      <main className={styles.main}>
+      <a className="skipLink" href="#main-content">Skip to content</a>
+      <main id="main-content" tabIndex={-1} className={styles.main}>
         <header className={styles.header}>
           <Link className={styles.brand} href="/" aria-label="RAG Playground home">
             <Orbit size={27} strokeWidth={1.5} aria-hidden="true" />

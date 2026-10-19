@@ -193,6 +193,22 @@ export function DocumentSetup({ onReady }: { onReady: (document: DocumentContext
 
       {busy && <p className={styles.progress} role="status"><LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /><span>Preparing {buildingName} for chat...</span></p>}
       {error && <p className={styles.error} role="alert">{error}</p>}
+
+      <article className={styles.explainer} aria-labelledby="rag-heading">
+        <h2 id="rag-heading">What is retrieval-augmented generation (RAG)?</h2>
+        <p>Retrieval-augmented generation, or RAG, combines information retrieval with a large language model. Instead of relying only on its training data, the model receives relevant passages from a document alongside a question. Those passages provide context for a document-grounded answer.</p>
+
+        <h3>How does document retrieval work?</h3>
+        <p>A RAG pipeline extracts text, splits it into smaller passages called chunks, and converts those chunks into numerical embeddings. A vector search compares the question with the stored embeddings to find related passages. The language model then generates an answer using the retrieved context. Retrieval quality depends on the document, chunk boundaries, embedding model, and search settings.</p>
+
+        <h3>How is RAG different from fine-tuning?</h3>
+        <p>RAG supplies reference material at query time without changing the model&apos;s weights. Fine-tuning changes model weights through additional training, often to adapt behavior, style, or task performance. The two approaches can complement each other. For questions about a changing collection of documents, retrieval makes it possible to update the reference material separately from the model.</p>
+
+        <h3>Can document chat give incorrect answers?</h3>
+        <p>Yes. Retrieval can miss important context, and a language model can misinterpret a passage or produce unsupported claims. Scanned PDFs also need optical character recognition before their text can be retrieved. Compare important answers with the original document; a fluent response is not proof of accuracy.</p>
+
+        <p className={styles.reference}>Further reading: <a href="https://arxiv.org/abs/2005.11401">Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks</a>, the research paper introducing the RAG approach.</p>
+      </article>
     </section>
   );
 }

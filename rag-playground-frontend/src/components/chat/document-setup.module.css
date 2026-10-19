@@ -41,6 +41,12 @@
 .progress svg { flex-shrink: 0; margin-top: 2px; }
 .spinner { animation: spin 1s linear infinite; }
 .error { margin-top: 16px; color: var(--error); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.explainer { margin-top: 48px; padding-top: 28px; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+.explainer h2 { font-size: 18px; font-weight: 500; line-height: 1.5; margin-bottom: 12px; }
+.explainer h3 { font-size: 14px; font-weight: 500; line-height: 1.5; margin: 24px 0 8px; }
+.explainer p { color: var(--secondary); font-size: 13px; line-height: 1.8; }
+.explainer .reference { margin-top: 24px; color: var(--muted); font-size: 12px; }
+.reference a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 480px) {
   .setup { padding: 24px 0; }

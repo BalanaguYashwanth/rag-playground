@@ -66,6 +66,25 @@ returns to document selection. UUID creation requires HTTPS or localhost and a
 modern browser. The UUID filters separate retrieval scopes, but are not an
 authentication or authorization mechanism.
 
+## Search Discoverability
+
+The server layout defines the production canonical URL, search and social
+metadata, and factual WebSite/WebApplication JSON-LD. The home page includes a
+short RAG explanation in its initial HTML. Native Next.js metadata routes serve
+`/robots.txt`, `/sitemap.xml`, and a 1200x630 PNG at `/opengraph-image`.
+
+Set the production URL once in `SITE_URL` in `src/site-config.ts`. Metadata,
+structured data, the sitemap, robots, and the social image hostname all use it.
+Rebuild/redeploy after changing it. Update the backend's `CORS_ALLOW_ORIGINS`
+environment variable separately to allow the new frontend origin.
+
+After deploying, verify these URLs, submit the sitemap in Google Search Console
+and Bing Webmaster Tools, and request indexing for the home page. Robots rules
+allow public search and AI crawlers, but do not grant access to document APIs.
+Robots rules are not access controls. Do not expose uploaded documents or chat
+content in metadata or sitemaps. Structured data and crawler access do not
+guarantee rankings, rich results, or citations in AI-generated answers.
+
 ## Checks
 
 ```bash
