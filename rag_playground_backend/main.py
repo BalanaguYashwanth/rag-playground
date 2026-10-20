@@ -1,4 +1,6 @@
+import asyncio
 import json
+import os
 from pathlib import Path
 from tempfile import TemporaryFile
 from typing import Annotated, Literal
@@ -11,8 +13,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from collections.abc import AsyncIterable
 from starlette.concurrency import run_in_threadpool
+from guard.lifespan import guard_lifespan
+from security import APISecurityMiddleware, ConcurrencyLimitMiddleware, create_security_config, positive_int
 
-MAX_DOCUMENT_BYTES = 1024 * 1024
+DOCUMENT_LIMITS = json.loads(Path(__file__).with_name("document_limits.json").read_text())
+MAX_DOCUMENT_BYTES = DOCUMENT_LIMITS["max_document_bytes"]
+MIN_CUSTOM_TEXT_LINES = DOCUMENT_LIMITS["min_custom_text_lines"]
+MAX_PDF_PAGES = DOCUMENT_LIMITS["max_pdf_pages"]
+MAX_DOCUMENT_SIZE_LABEL = f"{MAX_DOCUMENT_BYTES / (1024 * 1024):g} MiB"
+MAX_SEARCH_BODY_BYTES = 128 * 1024
 USER_ID_PATTERN = r"^user_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 
 class BuildBodyLimit:
@@ -20,38 +29,61 @@ class BuildBodyLimit:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or scope["path"] != "/rag/build":
+        if scope["type"] != "http" or scope["method"] != "POST":
             return await self.app(scope, receive, send)
+        limit = MAX_DOCUMENT_BYTES + 65536 if scope["path"] == "/rag/build" else MAX_SEARCH_BODY_BYTES
         with TemporaryFile() as body:
             total = 0
-            while True:
-                message = await receive()
-                if message["type"] == "http.disconnect":
-                    return
-                chunk = message.get("body", b"")
-                total += len(chunk)
-                if total > MAX_DOCUMENT_BYTES + 65536:
-                    return await JSONResponse(status_code=413, content={"detail": "Upload exceeds 1 MiB."})(scope, receive, send)
-                body.write(chunk)
-                if not message.get("more_body", False):
-                    break
+            try:
+                async with asyncio.timeout(15):
+                    while True:
+                        message = await receive()
+                        if message["type"] == "http.disconnect":
+                            return
+                        chunk = message.get("body", b"")
+                        total += len(chunk)
+                        if total > limit:
+                            return await JSONResponse(status_code=413, content={"detail": "Request body is too large."})(scope, receive, send)
+                        body.write(chunk)
+                        if not message.get("more_body", False):
+                            break
+            except TimeoutError:
+                return await JSONResponse(status_code=408, content={"detail": "Request upload took too long."})(scope, receive, send)
             body.seek(0)
+            replayed_complete = False
 
             async def limited_receive():
+                nonlocal replayed_complete
+                if replayed_complete:
+                    return await receive()
                 chunk = body.read(65536)
-                return {"type": "http.request", "body": chunk, "more_body": body.tell() < total}
+                replayed_complete = body.tell() >= total
+                return {"type": "http.request", "body": chunk, "more_body": not replayed_complete}
 
             await self.app(scope, limited_receive, send)
 
-app = FastAPI()
+security_config = create_security_config()
+app = FastAPI(
+    lifespan=guard_lifespan,
+    docs_url=None if os.getenv("K_SERVICE") else "/docs",
+    redoc_url=None if os.getenv("K_SERVICE") else "/redoc",
+    openapi_url=None if os.getenv("K_SERVICE") else "/openapi.json",
+)
 app.add_middleware(BuildBodyLimit)
+app.add_middleware(
+    ConcurrencyLimitMiddleware,
+    build_limit=positive_int("MAX_CONCURRENT_BUILDS", 1),
+    search_limit=positive_int("MAX_CONCURRENT_SEARCHES", 2),
+)
+app.add_middleware(APISecurityMiddleware, config=security_config)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=security_config.cors_allow_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Accept", "Authorization"],
+    expose_headers=["Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"],
 )
 
 @app.get('/status')
@@ -71,12 +103,12 @@ async def build_rag(
         if (source == "pdf") != (extension == ".pdf"):
             raise HTTPException(422, "The document type does not match the selected source.")
         if file.size is not None and file.size > MAX_DOCUMENT_BYTES:
-            raise HTTPException(413, "Document exceeds 1 MiB.")
+            raise HTTPException(413, f"Document exceeds {MAX_DOCUMENT_SIZE_LABEL}.")
         size = 0
         while chunk := await file.read(65536):
             size += len(chunk)
             if size > MAX_DOCUMENT_BYTES:
-                raise HTTPException(413, "Document exceeds 1 MiB.")
+                raise HTTPException(413, f"Document exceeds {MAX_DOCUMENT_SIZE_LABEL}.")
         if not size:
             raise HTTPException(422, "Document is empty.")
         await file.seek(0)
@@ -86,7 +118,8 @@ async def build_rag(
         return {"user_id": user_id, "document_id": document_id, "filename": Path(file.filename).name}
     except HTTPException:
         raise
-    except Exception:
+    except Exception as error:
+        print(f"Error occurred:", error)
         raise HTTPException(500, "Could not build the document index. Please try again.")
     finally:
         await file.close()
@@ -97,8 +130,8 @@ def extract_document(source, extension: str, require_lines: bool = True) -> str:
             text = source.read(MAX_DOCUMENT_BYTES + 1).decode("utf-8-sig")
         except UnicodeDecodeError:
             raise HTTPException(422, "Text files must use UTF-8 encoding.")
-        if require_lines and len(text.splitlines()) < 100:
-            raise HTTPException(422, "Text must contain at least 100 lines.")
+        if require_lines and len(text.splitlines()) < MIN_CUSTOM_TEXT_LINES:
+            raise HTTPException(422, f"Text must contain at least {MIN_CUSTOM_TEXT_LINES} lines.")
     else:
         # PDF Reader
         try:
@@ -108,15 +141,15 @@ def extract_document(source, extension: str, require_lines: bool = True) -> str:
             reader = PdfReader(source)
             if reader.is_encrypted:
                 raise HTTPException(422, "Encrypted PDFs are not supported.")
-            if len(reader.pages) > 100:
-                raise HTTPException(422, "PDFs may contain at most 100 pages.")
+            if len(reader.pages) > MAX_PDF_PAGES:
+                raise HTTPException(422, f"PDFs may contain at most {MAX_PDF_PAGES} pages.")
             parts = []
             extracted_size = 0
             for page in reader.pages:
                 part = page.extract_text() or ""
                 extracted_size += len(part.encode("utf-8")) + 1
                 if extracted_size > MAX_DOCUMENT_BYTES:
-                    raise HTTPException(413, "Extracted PDF text exceeds 1 MiB.")
+                    raise HTTPException(413, f"Extracted PDF text exceeds {MAX_DOCUMENT_SIZE_LABEL}.")
                 parts.append(part)
             text = "\n".join(parts)
         except HTTPException:

@@ -8,7 +8,10 @@ from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, Filter, FieldCondition, MatchValue, PayloadSchemaType
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
 from dotenv import load_dotenv
+from utils import send_email
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -56,7 +59,7 @@ def create_rag(text: str, user_id: str, document_id: str, filename: str):
         })]
         splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50) # What should be the ideal size of chunk ?
         chunks = splitter.split_documents(documents)
-
+        send_email(type="create_rag", context=document_id, input=user_id)
         embeddings_model = get_embeddings()
         if not client.collection_exists(EMBEDDINGS_COLLECTION_NAME):
             client.create_collection(
@@ -115,11 +118,12 @@ async def llm_output(context: str, input: str):
         #TODO: Resolve AFC message by re-implementing with chat prompt template with model check campusx video
         llm_model = init_chat_model("google_genai:gemini-3.5-flash-lite")
         prompt = f"system: you are helpful assistant and \n here is the context {context} and user query \n {input} based on it respond accordingly"
+        send_email(type="rag_search", context=context[:50], input=input)
         async for chunk in llm_model.astream(prompt): # replace with prompt template and gemini chat completions and system
             content = getattr(chunk, "content", None)
             if isinstance(content, list) and chunk.content and isinstance(chunk.content[0], dict):
                 if chunk.content[0].get('text'):
                     yield chunk.content[0].get('text')
     except Exception as error:
-       logging.exception("Error generating LLM response for user input=%r & error=%s", input, error)
-       raise Exception("Error generating response")
+        logger.exception("Error generating LLM response for user input=%r & error=%s", input, error)
+        raise Exception("Error generating response")
