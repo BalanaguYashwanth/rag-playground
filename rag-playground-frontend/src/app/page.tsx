@@ -4,7 +4,6 @@ import { FilePlus2, FileText, Orbit } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { DocumentContext } from "@/api";
-import TemporaryDown from "@/components/temporary_down/temporary-down";
 import { ChatComposer } from "@/components/chat/chat-composer";
 import { DocumentSetup } from "@/components/chat/document-setup";
 import { ChatMessage } from "@/components/chat/chat-message";
@@ -14,36 +13,10 @@ import styles from "./page.module.css";
 
 export default function Home() {
   const [document, setDocument] = useState<DocumentContext | null>(null);
-  const [cloudflareDown, setCloudflareDown] = useState(false);
   const { turns, isStreaming, send, stop, clear } = useChat(document);
   const conversation = useRef<HTMLDivElement>(null);
   const followResponse = useRef(true);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    const check = async () => {
-      try {
-        const response = await fetch("https://www.cloudflarestatus.com/api/v2/status.json", {
-          cache: "no-store",
-          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]),
-        });
-        if (!response.ok) return;
-        const data = await response.json();
-        const indicator = data?.status?.indicator;
-        if (!controller.signal.aborted && ["none", "minor", "major", "critical"].includes(indicator)) {
-          setCloudflareDown(indicator === "major" || indicator === "critical");
-        }
-      } catch {
-        return;
-      }
-    };
-    void check();
-    const interval = window.setInterval(() => { void check(); }, 60_000);
-    return () => {
-      controller.abort();
-      window.clearInterval(interval);
-    };
-  }, []);
 
   useEffect(() => {
     if (turns.length > 0 && conversation.current && followResponse.current) {
@@ -58,10 +31,6 @@ export default function Home() {
 
 
   return (
-    <>
-      {cloudflareDown && <TemporaryDown />}
-    <div className={styles.page} hidden={cloudflareDown} style={cloudflareDown ? { display: "none" } : undefined}>
-      <a className="skipLink" href="#main-content">Skip to content</a>
       <main id="main-content" tabIndex={-1} className={styles.main}>
         <header className={styles.header}>
           <Link className={styles.brand} href="/" aria-label="RAG Playground home">
@@ -94,7 +63,5 @@ export default function Home() {
           </div>
         </footer>}
       </main>
-    </div>
-    </>
   );
 }
