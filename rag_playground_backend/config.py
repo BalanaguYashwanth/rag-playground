@@ -1,0 +1,6 @@
+import os
+
+QDRANT_API_URL = str(os.getenv('QDRANT_API_URL'))
+QDRANT_API_KEY = str(os.getenv('QDRANT_API_KEY'))
+GOOGLE_API_KEY = str(os.getenv('GOOGLE_API_KEY'))
+EMBEDDINGS_COLLECTION_NAME = str(os.getenv('EMBEDDINGS_COLLECTION_NAME'))

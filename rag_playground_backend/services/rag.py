@@ -1,6 +1,8 @@
-import os, logging
+import logging
 from functools import lru_cache
 from threading import Lock
+from collections.abc import AsyncIterable
+from starlette.concurrency import run_in_threadpool
 from langchain.chat_models import init_chat_model
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -8,18 +10,14 @@ from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, Filter, FieldCondition, MatchValue, PayloadSchemaType
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from config import QDRANT_API_URL, QDRANT_API_KEY, EMBEDDINGS_COLLECTION_NAME
+from constant import CHUNK_SIZE, CHUNK_OVERLAP
 
 from dotenv import load_dotenv
-from utils import send_email
+from utils import normalize_filename, send_email, sse
 
 load_dotenv()
-
 logger = logging.getLogger(__name__)
-
-EMBEDDINGS_COLLECTION_NAME = str(os.getenv('EMBEDDINGS_COLLECTION_NAME'))
-QDRANT_API_URL = str(os.getenv('QDRANT_API_URL'))
-QDRANT_API_KEY = str(os.getenv('QDRANT_API_KEY'))
-GOOGLE_API_KEY = str(os.getenv('GOOGLE_API_KEY'))
 
 client = QdrantClient(
     api_key=QDRANT_API_KEY,
@@ -28,45 +26,36 @@ client = QdrantClient(
 build_lock = Lock()
 
 @lru_cache(maxsize=1)
-def get_embeddings():
+def get_embeddings(embedding_size):
+    if embedding_size < 400:
+        return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     return HuggingFaceEmbeddings()
 
-def main():
-    print("Hello from rag-playground!")
-
-def rag_steps():
-    # Note - Question every implement & should try every thing like keyword search and other distances etc
-    # Note - try batching, streaming
-
-    # Step 1 - Get data from pdf/document or text 
-
-    # Step 2 - Clean / remove unuse from text
-
-    # Step 2 - Do the chunking
-
-    # Step 3 - Keyword search
-
-    # Step 4 - Embedding using sentence transformer
-
-    # Step 5 - Vector search using generator / iterator, do the streaming
-    pass
-
-
-def create_rag(text: str, user_id: str, document_id: str, filename: str):
+def create_rag(text: str, user_id: str, document_id: str, filename: str, distance: Distance, embedding_size:int):
     with build_lock:
-        documents = [Document(page_content=text, metadata={
-            "user_id": user_id, "document_id": document_id, "source": filename,
-        })]
-        splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50) # What should be the ideal size of chunk ?
-        chunks = splitter.split_documents(documents)
+        splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=int(CHUNK_OVERLAP))
+        total_chunks = []
+        if len(text) < CHUNK_SIZE:
+            total_chunks.append(text)
+        else:
+            chunks = splitter.split_text(text)
+            total_chunks.extend(chunks)
+        
+        total_chunks.extend([
+            Document(
+                id=f"{document_id}_{normalize_filename(filename)}_chunk_'{str(index)}",
+                page_content=chunk,
+                metadata={"user_id": user_id, "document_id": document_id, "source": filename,}
+            ) for index, chunk in enumerate(total_chunks)])
+        
         send_email(type="create_rag", context=document_id, input=user_id)
-        embeddings_model = get_embeddings()
+        embeddings_model = get_embeddings(embedding_size)
         if not client.collection_exists(EMBEDDINGS_COLLECTION_NAME):
             client.create_collection(
-                collection_name=EMBEDDINGS_COLLECTION_NAME, 
+                collection_name=EMBEDDINGS_COLLECTION_NAME,
                 vectors_config=VectorParams(
                     size=len(embeddings_model.embed_query("dimension check")),
-                    distance=Distance.COSINE
+                    distance=distance
                 )
             )
         for field in ("metadata.user_id", "metadata.document_id"):
@@ -83,8 +72,8 @@ def create_rag(text: str, user_id: str, document_id: str, filename: str):
                 embedding=embeddings_model
             )
 
-        for offset in range(0, len(chunks), 32):
-            collection.add_documents(chunks[offset:offset + 32])
+        for offset in range(0, len(total_chunks), 32):
+            collection.add_documents(total_chunks[offset:offset + 32])
 
 def rag_search(input: str, user_id: str, document_id: str):
     try:
@@ -112,6 +101,23 @@ def rag_search(input: str, user_id: str, document_id: str):
     except Exception as error:
         logger.exception("Retrieval failed for input user query=%r error=%s", input, error)
         raise Exception("Error in search document")
+
+
+async def event_stream(user_query, user_id, document_id) -> AsyncIterable[str]:
+    try:
+        yield sse("status", {"type": "tag", "stage":"searching", "message": "Searching documents"})
+        vector_searches = await run_in_threadpool(rag_search, user_query, user_id, document_id)
+        yield sse('status', {"type": "tag", 'stage':'retrieved', 'message':'Document Retrieved'})
+        yield sse('status', {"type": "tag", 'stage':'generating', 'message':'Generating response'})
+        if not vector_searches:
+            yield sse('status', {'stage':'done', 'message': 'No data found'})
+            return
+
+        async for text in llm_output(vector_searches, user_query):
+            yield sse("status", {'stage':'response', 'message': text})
+        yield sse('status', {"type": "tag", 'stage': 'done', 'message':'Generated response'})
+    except Exception as error:
+        yield sse("status", {"stage":"error", "message": "Could not generate an answer."})
 
 async def llm_output(context: str, input: str):
     try:
