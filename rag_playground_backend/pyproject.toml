@@ -19,6 +19,8 @@ dependencies = [
     "unstructured>=0.27.10",
     "uvicorn>=0.54.0",
     "fastapi-guard>=8.0.2,<9",
+    "sqlalchemy[asyncio]>=2.1.2",
+    "psycopg>=3.3.6",
 ]
 
 [tool.uv.sources]

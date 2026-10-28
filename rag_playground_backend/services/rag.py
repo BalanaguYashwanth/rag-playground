@@ -14,6 +14,7 @@ from langchain_google_genai import GoogleGenerativeAI
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, Filter, FieldCondition, MatchValue, PayloadSchemaType
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from db_handler.conversation_handler import ConversationHandler
 from config import QDRANT_API_URL, QDRANT_API_KEY, EMBEDDINGS_COLLECTION_NAME, PROMPT_TEMPLATE
 from constant import CHUNK_SIZE, CHUNK_OVERLAP
 
@@ -120,6 +121,7 @@ def rag_search(input: str, user_id: str):
 
 async def event_stream(user_query, user_id) -> AsyncIterable[str]:
     try:
+        conversation_handler = ConversationHandler()
         yield sse("status", {"type": "tag", "stage":"searching", "message": "Searching documents"})
         vector_searches = await run_in_threadpool(rag_search, user_query, user_id)
         yield sse('status', {"type": "tag", 'stage':'retrieved', 'message':'Document Retrieved'})
@@ -127,9 +129,11 @@ async def event_stream(user_query, user_id) -> AsyncIterable[str]:
         if not vector_searches:
             yield sse('status', {'stage':'done', 'message': 'No data found'})
             return
-
+        full_text = ''
         async for text in llm_output(vector_searches, user_query):
+            full_text += text
             yield sse("status", {'stage':'response', 'message': text})
+        await conversation_handler.update_conversation(user_query, full_text, user_id)
         yield sse('status', {"type": "tag", 'stage': 'done', 'message':'Generated response'})
     except Exception as error:
         yield sse("status", {"stage":"error", "message": "Could not generate an answer."})
