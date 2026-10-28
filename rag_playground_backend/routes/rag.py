@@ -64,7 +64,6 @@ async def build_rag(
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=12000)
     user_id: str = Field(pattern=USER_ID_PATTERN)
-    document_id: UUID
 
 
 @rag_router.post('/search')
@@ -74,7 +73,7 @@ def search(request: SearchRequest):
     if not user_query:
         raise ValueError('User query is required')
     return StreamingResponse(
-        event_stream(user_query, request.user_id, str(request.document_id)),
+        event_stream(user_query, request.user_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control":"no-cache",
