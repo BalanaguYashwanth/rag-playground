@@ -1,21 +1,19 @@
-from main import app
+from fastapi import APIRouter
 from pathlib import Path
 from typing import Annotated, Literal
 from qdrant_client.models import Distance
 from uuid import UUID, uuid4
 from utils import extract_document
 from pydantic import BaseModel, Field
-from rag_playground_backend.services.rag import create_rag, event_stream
+from services.rag import create_rag, event_stream
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 from fastapi import File, Form, HTTPException, UploadFile
 from constant import USER_ID_PATTERN, MAX_DOCUMENT_BYTES, MAX_DOCUMENT_SIZE_LABEL, ALLOWED_FILE_TYPE
 
-@app.get('/status')
-def status():
-    return {'status': 200}
+rag_router = APIRouter(prefix='/rag', tags=['rag'])
 
-@app.post('/rag/build')
+@rag_router.post('/build')
 async def build_rag(
     file: Annotated[UploadFile, File()],
     user_id: Annotated[str, Form(pattern=USER_ID_PATTERN)],
@@ -45,18 +43,16 @@ async def build_rag(
             raise HTTPException(422, "Document is empty.")
         await file.seek(0)
         generator_text = await run_in_threadpool(extract_document, file.file, extension, source != "template")
-        document_id = str(uuid4())
         for text in generator_text:
             await run_in_threadpool(
                 create_rag, 
                 text, 
                 user_id, 
-                document_id, 
                 Path(file.filename or "").name,
                 distance,
                 embedding_size=int(embedding_size)
             )
-        return {"user_id": user_id, "document_id": document_id, "filename": Path(file.filename or "").name}
+        return {"user_id": user_id, "filename": Path(file.filename or "").name}
     except HTTPException:
         raise
     except Exception as error:
@@ -71,7 +67,7 @@ class SearchRequest(BaseModel):
     document_id: UUID
 
 
-@app.post('/rag/search')
+@rag_router.post('/search')
 def search(request: SearchRequest):
     #TODO: SSE handles 500, so check how frontend reacts it ?
     user_query = request.query
@@ -85,4 +81,3 @@ def search(request: SearchRequest):
             "X-Accel-Buffering":"no"
         }
     )
-    return {}

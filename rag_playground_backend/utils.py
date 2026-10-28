@@ -57,9 +57,6 @@ def extract_document(source, extension: str, require_lines: bool = True):
         except UnicodeDecodeError:
             raise HTTPException(422, "Text files must use UTF-8 encoding.")
 
-        if len(text.encode("utf-8")) > MAX_DOCUMENT_BYTES:
-            raise HTTPException(413, f"Document exceeds {MAX_DOCUMENT_SIZE_LABEL}.")
-
         if require_lines and len(text.splitlines()) < MIN_CUSTOM_TEXT_LINES:
             raise HTTPException(422, f"Text must contain at least {MIN_CUSTOM_TEXT_LINES} lines.")
 
@@ -86,35 +83,24 @@ def extract_document(source, extension: str, require_lines: bool = True):
         if len(reader.pages) > MAX_PDF_PAGES:
             raise HTTPException(422, f"PDFs may contain at most {MAX_PDF_PAGES} pages.")
 
-        parts = []
-        extracted_size = 0
         batch_size = 100 * CHUNK_SIZE
-
+        contents = ''
         for page in reader.pages:
             part = page.extract_text() or ""
-            extracted_size += len(part.encode("utf-8")) + 1
+            contents = contents + "\n" + part
+            if len(contents) >= batch_size:
 
-            if extracted_size > MAX_DOCUMENT_BYTES:
-                raise HTTPException(413, f"Extracted PDF text exceeds {MAX_DOCUMENT_SIZE_LABEL}.")
-
-            parts.append(part)
-            if sum(len(p) for p in parts) >= batch_size:
-                text = "\n".join(parts)
-
-                if text.strip():
-                    if "\x00" in text:
+                if contents.strip():
+                    if "\x00" in contents:
                         raise HTTPException(422, "Document contains invalid text.")
-                    yield text
+                    yield contents
 
-                parts = []
+                contents = ''
 
-        # Yield remaining pages
-        text = "\n".join(parts)
-
-        if text.strip():
-            if "\x00" in text:
+        if contents.strip():
+            if "\x00" in contents:
                 raise HTTPException(422, "Document contains invalid text.")
-            yield text
+            yield contents
 
     except HTTPException:
         raise
@@ -160,4 +146,4 @@ class BuildBodyLimit:
             await self.app(scope, limited_receive, send)
 
 def normalize_filename(filename: str) -> str:
-    return re.sub(r"[^\w.-]+", "_", filename).strip("_")
+    return re.sub(r"[^\w.-]+", "_", filename).strip("_").lower()

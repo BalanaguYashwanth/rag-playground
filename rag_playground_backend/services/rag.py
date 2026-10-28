@@ -1,6 +1,7 @@
 import logging
 from functools import lru_cache
 from threading import Lock
+from uuid import uuid5, NAMESPACE_DNS
 from collections.abc import AsyncIterable
 from starlette.concurrency import run_in_threadpool
 from langchain.chat_models import init_chat_model
@@ -31,49 +32,53 @@ def get_embeddings(embedding_size):
         return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     return HuggingFaceEmbeddings()
 
-def create_rag(text: str, user_id: str, document_id: str, filename: str, distance: Distance, embedding_size:int):
-    with build_lock:
-        splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=int(CHUNK_OVERLAP))
-        total_chunks = []
-        if len(text) < CHUNK_SIZE:
-            total_chunks.append(text)
-        else:
-            chunks = splitter.split_text(text)
-            total_chunks.extend(chunks)
-        
-        total_chunks.extend([
-            Document(
-                id=f"{document_id}_{normalize_filename(filename)}_chunk_'{str(index)}",
-                page_content=chunk,
-                metadata={"user_id": user_id, "document_id": document_id, "source": filename,}
-            ) for index, chunk in enumerate(total_chunks)])
-        
-        send_email(type="create_rag", context=document_id, input=user_id)
-        embeddings_model = get_embeddings(embedding_size)
-        if not client.collection_exists(EMBEDDINGS_COLLECTION_NAME):
-            client.create_collection(
-                collection_name=EMBEDDINGS_COLLECTION_NAME,
-                vectors_config=VectorParams(
-                    size=len(embeddings_model.embed_query("dimension check")),
-                    distance=distance
+def create_rag(text: str, user_id: str, filename: str, distance: Distance, embedding_size:int):
+    try:
+        with build_lock:
+            splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=int(CHUNK_OVERLAP))
+            total_chunks = []
+            if len(text) < CHUNK_SIZE:
+                total_chunks.append(text)
+            else:
+                chunks = splitter.split_text(text)
+                total_chunks.extend(chunks)
+            
+            embeddings_model = get_embeddings(embedding_size)
+            embeddings_model_name = embeddings_model.model_name
+            embeddings_model_size = len(embeddings_model.embed_query("dimension check"))
+            total_chunks = [
+                Document(
+                    id=str(uuid5(NAMESPACE_DNS,f"{normalize_filename(filename)}_chunk_{index}")),
+                    page_content=chunk,
+                    metadata={
+                        "user_id": user_id,
+                        "source": filename,
+                        "embeddings_model_name": embeddings_model_name, 
+                        "embeddings_model_size": embeddings_model_size
+                    }
+                ) for index, chunk in enumerate(total_chunks)]
+            
+            send_email(type="create_rag", context="", input=user_id)
+            if not client.collection_exists(EMBEDDINGS_COLLECTION_NAME):
+                client.create_collection(
+                    collection_name=EMBEDDINGS_COLLECTION_NAME,
+                    vectors_config=VectorParams(
+                        size=embeddings_model_size,
+                        distance=distance
+                    )
                 )
-            )
-        for field in ("metadata.user_id", "metadata.document_id"):
-            client.create_payload_index(
-                collection_name=EMBEDDINGS_COLLECTION_NAME,
-                field_name=field,
-                field_schema=PayloadSchemaType.KEYWORD,
-                wait=True,
-            )
 
-        collection = QdrantVectorStore(
-                client=client,
-                collection_name=EMBEDDINGS_COLLECTION_NAME,
-                embedding=embeddings_model
-            )
+            collection = QdrantVectorStore(
+                    client=client,
+                    collection_name=EMBEDDINGS_COLLECTION_NAME,
+                    embedding=embeddings_model
+                )
 
-        for offset in range(0, len(total_chunks), 32):
-            collection.add_documents(total_chunks[offset:offset + 32])
+            for offset in range(0, len(total_chunks), 32):
+                collection.add_documents(total_chunks[offset:offset + 32])
+    except Exception as error:
+        logger.exception("Rag build failed:", error)
+        raise Exception("Couldn't build the rag")
 
 def rag_search(input: str, user_id: str, document_id: str):
     try:

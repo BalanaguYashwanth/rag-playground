@@ -1,5 +1,6 @@
 import os
 from fastapi import FastAPI
+from routes.rag import rag_router
 from fastapi.middleware.cors import CORSMiddleware
 from guard.lifespan import guard_lifespan
 from utils import BuildBodyLimit
@@ -27,3 +28,9 @@ app.add_middleware(
     allow_headers=["Content-Type", "Accept", "Authorization"],
     expose_headers=["Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"],
 )
+
+@app.get('/status')
+def status():
+    return {'status': 200}
+
+app.include_router(rag_router)
