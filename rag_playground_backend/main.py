@@ -1,6 +1,7 @@
 import os
 from fastapi import FastAPI
 from routes.rag import rag_router
+from routes.chat import chat_router
 from db_handler.db import Base
 from db_models.conversation import ConversationModel
 from contextlib import asynccontextmanager
@@ -44,10 +45,9 @@ app.add_middleware(
     expose_headers=["Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"],
 )
 
-
-
 @app.get('/status')
 def status():
     return {'status': 200}
 
 app.include_router(rag_router)
+app.include_router(chat_router)

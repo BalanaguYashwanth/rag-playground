@@ -50,7 +50,7 @@ const templates = [
   },
 ];
 
-export function DocumentSetup({ onReady }: { onReady: (document: DocumentContext) => void }) {
+export function DocumentSetup({ onReady }: { onReady: (userId: string) => void }) {
   const [mode, setMode] = useState<DocumentSource>("template");
   const [text, setText] = useState("");
   const [pdf, setPdf] = useState<File | null>(null);
@@ -89,12 +89,12 @@ export function DocumentSetup({ onReady }: { onReady: (document: DocumentContext
         userId.current = saved && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(saved) ? saved : `${crypto.randomUUID()}`;
         try { sessionStorage.setItem("rag-user-id", userId.current); } catch {}
       }
-      const document = await buildDocument(file, userId.current, source, controller.signal);
-      window.history.pushState(null, '', `/${document.user_id}`)
+      await buildDocument(file, userId.current, source, controller.signal);
+      window.history.pushState(null, '', `/${userId.current}`)
       if (!controller.signal.aborted) {
         setText("");
         setPdf(null);
-        onReady(document);
+        onReady(userId.current);
       }
     } catch (failure) {
       if (!controller.signal.aborted) setError(getErrorMessage(failure));

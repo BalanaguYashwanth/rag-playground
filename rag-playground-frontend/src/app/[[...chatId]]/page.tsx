@@ -1,31 +1,59 @@
 "use client";
 import { useParams } from "next/navigation";
 
-import { FilePlus2, FileText, Orbit } from "lucide-react";
+import { FilePlus2, LoaderCircle, Orbit } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import type { DocumentContext } from "@/api";
 import { ChatComposer } from "@/components/chat/chat-composer";
 import { DocumentSetup } from "@/components/chat/document-setup";
 import { ChatMessage } from "@/components/chat/chat-message";
 import { EmptyState } from "@/components/chat/empty-state";
-import { useChat } from "@/hooks/use-chat";
+import { useChat, type ChatTurn } from "@/hooks/use-chat";
 import styles from "../page.module.css";
+import { fetchConversation, getErrorMessage } from "@/api";
 
 export default function Home() {
   const params = useParams();
-  const chatId = params?.chatId?.[0] ?? null;
-  const [document, setDocument] = useState<DocumentContext | null>(null);
-  const { turns, isStreaming, send, stop, clear } = useChat(document);
+  const chatId = (params?.chatId?.[0])?.toString() ?? null;
+  const [userId, setUserId] = useState<string | null>(chatId);
+  const { turns, addTurns, isStreaming, send, stop, clear } = useChat(userId);
   const conversation = useRef<HTMLDivElement>(null);
   const followResponse = useRef(true);
-
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadedChatId, setLoadedChatId] = useState<string | null>(null);
+  const isLoading = chatId !== null && loadedChatId !== chatId;
 
   useEffect(() => {
     if (turns.length > 0 && conversation.current && followResponse.current) {
       conversation.current.scrollTop = conversation.current.scrollHeight;
     }
   }, [turns]);
+
+  useEffect(() => {
+    if (!chatId) return;
+    const controller = new AbortController();
+    fetchConversation(chatId, controller.signal)
+      .then((conversations) => {
+        if (controller.signal.aborted) return;
+        setLoadError(null);
+        followResponse.current = true;
+        addTurns(conversations.map((item): ChatTurn => ({
+          id: String(item.id),
+          question: item.user,
+          answer: item.agent,
+          stages: [],
+          state: "complete",
+        })));
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setLoadError(getErrorMessage(error));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoadedChatId(chatId);
+      });
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId]);
 
   const submit = (question: string) => {
     followResponse.current = true;
@@ -40,9 +68,8 @@ export default function Home() {
             <Orbit size={27} strokeWidth={1.5} aria-hidden="true" />
             <span>RAG <span className={styles.brandSecondary}>Playground</span></span>
           </Link>
-          {document && <div className={styles.headerTools}>
-            <span className={styles.headerBadge} title={document.filename}><FileText size={12} aria-hidden="true" /><span>{document.filename}</span></span>
-            <button className={styles.documentButton} type="button" disabled={isStreaming} aria-label="Choose another document" title="Choose another document" onClick={() => { clear(); setDocument(null); }}><FilePlus2 size={18} aria-hidden="true" /></button>
+          {userId && <div className={styles.headerTools}>
+            <button className={styles.documentButton} type="button" disabled={isStreaming} aria-label="Choose another document" title="Choose another document" onClick={() => { clear(); setUserId(null); }}><FilePlus2 size={18} aria-hidden="true" /></button>
           </div>}
         </header>
 
@@ -51,7 +78,10 @@ export default function Home() {
           followResponse.current = element.scrollHeight - element.scrollTop - element.clientHeight < 100;
         }}>
           <div className={`${styles.conversationInner} ${turns.length === 0 ? styles.emptyConversation : ""}`}>
-            {!document ? <DocumentSetup onReady={setDocument} /> : turns.length === 0 ? <EmptyState onSelect={submit} /> : (
+            {loadError && turns.length === 0 && <p role="alert" className={styles.loadError}>{loadError}</p>}
+            {userId && isLoading && turns.length === 0 ? (
+              <p role="status" className={styles.loading}><LoaderCircle size={18} className={styles.spinner} aria-hidden="true" /><span>Loading conversation...</span></p>
+            ) : !userId ? <DocumentSetup onReady={setUserId} /> : turns.length === 0 ? <EmptyState onSelect={submit} /> : (
               <div role="log" aria-label="Conversation" aria-live="off" className={styles.messages}>
                 {turns.map((turn) => <ChatMessage key={turn.id} turn={turn} isStreaming={isStreaming} onRetry={() => { followResponse.current = true; void send(turn.question, turn.id); }} />)}
               </div>
@@ -59,7 +89,7 @@ export default function Home() {
           </div>
         </div>
 
-        {document && <footer className={styles.footer}>
+        {userId && <footer className={styles.footer}>
           <div className={styles.composerWidth}>
             <ChatComposer isStreaming={isStreaming} onSend={submit} onStop={stop} />
             <p className={styles.disclaimer}>Answers may be imperfect. Check important details.</p>

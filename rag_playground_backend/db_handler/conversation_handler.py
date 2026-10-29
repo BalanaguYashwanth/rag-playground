@@ -16,12 +16,15 @@ class ConversationHandler:
 
 
     async def get_conversation(self, reference_uuid):
-        async with AsyncSessionLocal() as session:
-            conversation = await session.execute(
-                select(ConversationModel).where(
-                    ConversationModel.reference_uuid == reference_uuid,
+        try:
+            async with AsyncSessionLocal() as session:
+                conversation = await session.execute(
+                    select(ConversationModel).where(
+                        ConversationModel.reference_uuid == reference_uuid,
+                    ).order_by(ConversationModel.created_at)
                 )
-            )
-            return conversation.scalars().all()
+                return conversation.scalars().all()
+        except Exception:
+            raise
 
     

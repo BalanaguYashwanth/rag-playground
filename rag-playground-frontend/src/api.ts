@@ -114,7 +114,7 @@ export async function buildDocument(
 export async function rag_search(
   input: string,
   onEvent: (event: string, data: RagEvent) => void,
-  document: DocumentContext,
+  userId: string | null,
   signal?: AbortSignal,
 ): Promise<void> {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL;
@@ -140,7 +140,7 @@ export async function rag_search(
     await fetchEventSource(`${apiUrl.replace(/\/$/, "")}/rag/search`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify({ query: input, user_id: document.user_id }),
+      body: JSON.stringify({ query: input, user_id: userId }),
       signal: controller.signal,
       openWhenHidden: true,
       async onopen(response) {
@@ -187,4 +187,18 @@ export async function rag_search(
     clearTimeout(timer);
     signal?.removeEventListener("abort", abort);
   }
+}
+
+export type ConversationEntry = { id: number; user: string; agent: string };
+
+export async function fetchConversation(userId: string, signal?: AbortSignal): Promise<ConversationEntry[]> {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+  if (!apiUrl) throw new RagRequestError("The backend isn't configured. Set NEXT_PUBLIC_API_URL and restart the frontend.");
+  if (!uuidPattern.test(userId)) throw new RagRequestError("Invalid conversation link.");
+  const response = await fetch(`${apiUrl.replace(/\/$/, "")}/chat/${encodeURIComponent(userId)}`, { signal });
+  if (!response.ok) throw new RagRequestError("Couldn't load the conversation. Please try again.");
+  const data: unknown = await response.json().catch(() => null);
+  if (!Array.isArray(data)) throw new RagRequestError("The server returned an invalid conversation.");
+  return data.filter((item): item is ConversationEntry =>
+    typeof item === "object" && item !== null && typeof item.user === "string" && typeof item.agent === "string");
 }
