@@ -7,7 +7,7 @@ export const MIN_CUSTOM_TEXT_LINES = documentLimits.min_custom_text_lines;
 export const MAX_PDF_PAGES = documentLimits.max_pdf_pages;
 export const MAX_DOCUMENT_SIZE_LABEL = `${MAX_DOCUMENT_BYTES / (1024 * 1024)} MiB`;
 export type DocumentSource = "custom" | "pdf" | "template";
-export type DocumentContext = { user_id: string; document_id: string; filename: string };
+export type DocumentContext = { user_id: string; filename: string };
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export function measureText(text: string) {
@@ -64,7 +64,7 @@ export async function buildDocument(
   if (!apiUrl) throw new RagRequestError("The backend isn't configured. Set NEXT_PUBLIC_API_URL and restart the frontend.");
   if (!file.size || file.size > MAX_DOCUMENT_BYTES) throw new RagRequestError(`Choose a nonempty document no larger than ${MAX_DOCUMENT_SIZE_LABEL}.`);
   if (!(source === "pdf" ? /\.pdf$/i : /\.txt$/i).test(file.name)) throw new RagRequestError("The file type does not match the selected source.");
-  if (!userId.startsWith("user_") || !uuidPattern.test(userId.slice(5))) throw new RagRequestError("Invalid user session. Please refresh the page.");
+  if (!uuidPattern.test(userId)) throw new RagRequestError("Invalid user session. Please refresh the page.");
   if (source !== "pdf") {
     const bytes = await file.arrayBuffer();
     let text: string;
@@ -98,11 +98,10 @@ export async function buildDocument(
       throw new RagRequestError(detail);
     }
     if (!data || typeof data !== "object" || !("user_id" in data) || data.user_id !== userId ||
-        !("document_id" in data) || typeof data.document_id !== "string" || !uuidPattern.test(data.document_id) ||
         !("filename" in data) || typeof data.filename !== "string") {
       throw new RagRequestError("The server returned an invalid document session.");
     }
-    return { user_id: userId, document_id: data.document_id, filename: data.filename };
+    return { user_id: userId, filename: data.filename };
   } catch (error) {
     if (timedOut) throw new RagRequestError("Building the document timed out. Please try again.");
     throw error;
@@ -141,7 +140,7 @@ export async function rag_search(
     await fetchEventSource(`${apiUrl.replace(/\/$/, "")}/rag/search`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify({ query: input, user_id: document.user_id, document_id: document.document_id }),
+      body: JSON.stringify({ query: input, user_id: document.user_id }),
       signal: controller.signal,
       openWhenHidden: true,
       async onopen(response) {

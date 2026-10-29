@@ -1,4 +1,5 @@
 "use client";
+import { useParams } from "next/navigation";
 
 import { FilePlus2, FileText, Orbit } from "lucide-react";
 import Link from "next/link";
@@ -9,9 +10,11 @@ import { DocumentSetup } from "@/components/chat/document-setup";
 import { ChatMessage } from "@/components/chat/chat-message";
 import { EmptyState } from "@/components/chat/empty-state";
 import { useChat } from "@/hooks/use-chat";
-import styles from "./page.module.css";
+import styles from "../page.module.css";
 
 export default function Home() {
+  const params = useParams();
+  const chatId = params?.chatId?.[0] ?? null;
   const [document, setDocument] = useState<DocumentContext | null>(null);
   const { turns, isStreaming, send, stop, clear } = useChat(document);
   const conversation = useRef<HTMLDivElement>(null);

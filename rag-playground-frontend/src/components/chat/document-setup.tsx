@@ -86,10 +86,11 @@ export function DocumentSetup({ onReady }: { onReady: (document: DocumentContext
         let saved: string | null = null;
         try { saved = sessionStorage.getItem("rag-user-id"); } catch {}
         if (!globalThis.crypto?.randomUUID) throw new RagRequestError("This browser requires HTTPS or localhost to create a user session.");
-        userId.current = saved && /^user_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(saved) ? saved : `user_${crypto.randomUUID()}`;
+        userId.current = saved && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(saved) ? saved : `${crypto.randomUUID()}`;
         try { sessionStorage.setItem("rag-user-id", userId.current); } catch {}
       }
       const document = await buildDocument(file, userId.current, source, controller.signal);
+      window.history.pushState(null, '', `/${document.user_id}`)
       if (!controller.signal.aborted) {
         setText("");
         setPdf(null);

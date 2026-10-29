@@ -45,13 +45,13 @@ checked for readable UTF-8 before upload. PDF contents are validated by the
 backend before indexing.
 
 `POST /rag/build` uses `FormData` containing `file`, `user_id`, and `source`.
-The browser supplies the multipart boundary. A `user_<UUID v4>` is kept in
+The browser supplies the multipart boundary. A `<UUID v4>` is kept in
 session storage (or memory when storage is unavailable); the backend returns
 a document UUID. Only one build runs at a time, with a five-minute client timeout.
 The composer appears after a successful build. The header's document button
 clears the current conversation and returns to document selection.
 
-The frontend posts `{ "query": "...", "user_id": "user_<uuid>", "document_id": "<uuid>" }` to `/rag/search` and expects `text/event-stream`. Each `status` event contains a JSON payload:
+The frontend posts `{ "query": "...", "user_id": "<uuid>", "document_id": "<uuid>" }` to `/rag/search` and expects `text/event-stream`. Each `status` event contains a JSON payload:
 
 ```json
 { "type": "tag", "stage": "searching", "message": "Searching documents" }
