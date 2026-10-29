@@ -1,8 +1,13 @@
 import { fetchEventSource } from "@microsoft/fetch-event-source";
+import { config_document_limits } from "./document_limits";
 
-export const MAX_DOCUMENT_BYTES = 1024 * 1024;
+const documentLimits = config_document_limits;
+export const MAX_DOCUMENT_BYTES = documentLimits.max_document_bytes;
+export const MIN_CUSTOM_TEXT_LINES = documentLimits.min_custom_text_lines;
+export const MAX_PDF_PAGES = documentLimits.max_pdf_pages;
+export const MAX_DOCUMENT_SIZE_LABEL = `${MAX_DOCUMENT_BYTES / (1024 * 1024)} MiB`;
 export type DocumentSource = "custom" | "pdf" | "template";
-export type DocumentContext = { user_id: string; document_id: string; filename: string };
+export type DocumentContext = { user_id: string; filename: string };
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export function measureText(text: string) {
@@ -57,9 +62,22 @@ export async function buildDocument(
 ): Promise<DocumentContext> {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL;
   if (!apiUrl) throw new RagRequestError("The backend isn't configured. Set NEXT_PUBLIC_API_URL and restart the frontend.");
-  if (!file.size || file.size > MAX_DOCUMENT_BYTES) throw new RagRequestError("Choose a nonempty document no larger than 1 MiB.");
+  if (!file.size || file.size > MAX_DOCUMENT_BYTES) throw new RagRequestError(`Choose a nonempty document no larger than ${MAX_DOCUMENT_SIZE_LABEL}.`);
   if (!(source === "pdf" ? /\.pdf$/i : /\.txt$/i).test(file.name)) throw new RagRequestError("The file type does not match the selected source.");
-  if (!userId.startsWith("user_") || !uuidPattern.test(userId.slice(5))) throw new RagRequestError("Invalid user session. Please refresh the page.");
+  if (!uuidPattern.test(userId)) throw new RagRequestError("Invalid user session. Please refresh the page.");
+  if (source !== "pdf") {
+    const bytes = await file.arrayBuffer();
+    let text: string;
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      throw new RagRequestError("Text files must use UTF-8 encoding.");
+    }
+    if (!text.trim() || text.includes("\x00")) throw new RagRequestError("Document must contain readable text.");
+    if (source === "custom" && measureText(text).lines < MIN_CUSTOM_TEXT_LINES) {
+      throw new RagRequestError(`Text must contain at least ${MIN_CUSTOM_TEXT_LINES} lines.`);
+    }
+  }
   const form = new FormData();
   form.append("file", file);
   form.append("user_id", userId);
@@ -80,11 +98,10 @@ export async function buildDocument(
       throw new RagRequestError(detail);
     }
     if (!data || typeof data !== "object" || !("user_id" in data) || data.user_id !== userId ||
-        !("document_id" in data) || typeof data.document_id !== "string" || !uuidPattern.test(data.document_id) ||
         !("filename" in data) || typeof data.filename !== "string") {
       throw new RagRequestError("The server returned an invalid document session.");
     }
-    return { user_id: userId, document_id: data.document_id, filename: data.filename };
+    return { user_id: userId, filename: data.filename };
   } catch (error) {
     if (timedOut) throw new RagRequestError("Building the document timed out. Please try again.");
     throw error;
@@ -97,7 +114,7 @@ export async function buildDocument(
 export async function rag_search(
   input: string,
   onEvent: (event: string, data: RagEvent) => void,
-  document: DocumentContext,
+  userId: string | null,
   signal?: AbortSignal,
 ): Promise<void> {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL;
@@ -123,7 +140,7 @@ export async function rag_search(
     await fetchEventSource(`${apiUrl.replace(/\/$/, "")}/rag/search`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify({ query: input, user_id: document.user_id, document_id: document.document_id }),
+      body: JSON.stringify({ query: input, user_id: userId }),
       signal: controller.signal,
       openWhenHidden: true,
       async onopen(response) {
@@ -170,4 +187,18 @@ export async function rag_search(
     clearTimeout(timer);
     signal?.removeEventListener("abort", abort);
   }
+}
+
+export type ConversationEntry = { id: number; user: string; agent: string };
+
+export async function fetchConversation(userId: string, signal?: AbortSignal): Promise<ConversationEntry[]> {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+  if (!apiUrl) throw new RagRequestError("The backend isn't configured. Set NEXT_PUBLIC_API_URL and restart the frontend.");
+  if (!uuidPattern.test(userId)) throw new RagRequestError("Invalid conversation link.");
+  const response = await fetch(`${apiUrl.replace(/\/$/, "")}/chat/${encodeURIComponent(userId)}`, { signal });
+  if (!response.ok) throw new RagRequestError("Couldn't load the conversation. Please try again.");
+  const data: unknown = await response.json().catch(() => null);
+  if (!Array.isArray(data)) throw new RagRequestError("The server returned an invalid conversation.");
+  return data.filter((item): item is ConversationEntry =>
+    typeof item === "object" && item !== null && typeof item.user === "string" && typeof item.agent === "string");
 }

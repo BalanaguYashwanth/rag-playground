@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { distance } from "fastest-levenshtein";
-import { getErrorMessage, rag_search, type DocumentContext, type RagStage } from "@/api";
+import { getErrorMessage, rag_search, type RagStage } from "@/api";
 
 const greetingGroups = [
   {
@@ -45,7 +45,7 @@ export type ChatTurn = {
   error?: string;
 };
 
-export function useChat(document: DocumentContext | null = null) {
+export function useChat(userId: string | null = null) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const activeRequest = useRef<AbortController | null>(null);
@@ -54,7 +54,7 @@ export function useChat(document: DocumentContext | null = null) {
 
   const send = async (question: string, retryId?: string) => {
     const query = question.trim();
-    if (!query || activeRequest.current || !document) return;
+    if (!query || activeRequest.current || !userId) return;
     const id = retryId ?? crypto.randomUUID();
     const greeting = getGreetingResponse(query);
     const turn: ChatTurn = { id, question: query, answer: greeting ?? "", state: greeting ? "complete" : "streaming", stages: [] };
@@ -83,7 +83,7 @@ export function useChat(document: DocumentContext | null = null) {
         } else if (data.stage === "response" || data.stage === "done") {
           update((item) => ({ ...item, answer: item.answer + data.message }));
         }
-      }, document, controller.signal);
+      }, userId, controller.signal);
       update((item) => ({ ...item, state: controller.signal.aborted ? "stopped" : "complete" }));
     } catch (error: unknown) {
       update((item) => controller.signal.aborted
@@ -104,6 +104,10 @@ export function useChat(document: DocumentContext | null = null) {
     setIsStreaming(false);
     setTurns([]);
   };
+  
+  const addTurns = (loaded: ChatTurn[]) => {
+    if (loaded.length) setTurns(loaded);
+  };
 
-  return { turns, isStreaming, send, stop, clear };
+  return { turns, addTurns, isStreaming, send, stop, clear };
 }

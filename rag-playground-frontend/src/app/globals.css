@@ -49,5 +49,7 @@ a {
 button, textarea, input { font-family: inherit; letter-spacing: 0; }
 button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 button:disabled { cursor: not-allowed; }
+.skipLink { position: fixed; top: 12px; left: 12px; z-index: 100; transform: translateY(-200%); padding: 12px 16px; border-radius: 4px; background: var(--accent); color: var(--sidebar); font-size: 14px; }
+.skipLink:focus { transform: translateY(0); }
 ::selection { background: #a8d7be33; color: var(--text); }
 * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; letter-spacing: 0; }

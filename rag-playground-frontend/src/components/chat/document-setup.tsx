@@ -2,7 +2,7 @@
 
 import { ArrowRight, BookOpen, Download, Eye, EyeOff, FileText, FileUp, LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { buildDocument, getErrorMessage, MAX_DOCUMENT_BYTES, measureText, RagRequestError, type DocumentContext, type DocumentSource } from "@/api";
+import { buildDocument, getErrorMessage, MAX_DOCUMENT_BYTES, MAX_DOCUMENT_SIZE_LABEL, MAX_PDF_PAGES, MIN_CUSTOM_TEXT_LINES, measureText, RagRequestError, type DocumentContext, type DocumentSource } from "@/api";
 import styles from "./document-setup.module.css";
 
 const templates = [
@@ -50,7 +50,7 @@ const templates = [
   },
 ];
 
-export function DocumentSetup({ onReady }: { onReady: (document: DocumentContext) => void }) {
+export function DocumentSetup({ onReady }: { onReady: (userId: string) => void }) {
   const [mode, setMode] = useState<DocumentSource>("template");
   const [text, setText] = useState("");
   const [pdf, setPdf] = useState<File | null>(null);
@@ -61,7 +61,7 @@ export function DocumentSetup({ onReady }: { onReady: (document: DocumentContext
   const active = useRef<AbortController | null>(null);
   const userId = useRef<string | null>(null);
   const stats = measureText(text);
-  const validText = stats.lines >= 100 && stats.bytes <= MAX_DOCUMENT_BYTES && !!text.trim();
+  const validText = stats.lines >= MIN_CUSTOM_TEXT_LINES && stats.bytes <= MAX_DOCUMENT_BYTES && !!text.trim() && !text.includes("\x00");
 
   useEffect(() => () => active.current?.abort(), []);
 
@@ -86,14 +86,15 @@ export function DocumentSetup({ onReady }: { onReady: (document: DocumentContext
         let saved: string | null = null;
         try { saved = sessionStorage.getItem("rag-user-id"); } catch {}
         if (!globalThis.crypto?.randomUUID) throw new RagRequestError("This browser requires HTTPS or localhost to create a user session.");
-        userId.current = saved && /^user_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(saved) ? saved : `user_${crypto.randomUUID()}`;
+        userId.current = saved && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(saved) ? saved : `${crypto.randomUUID()}`;
         try { sessionStorage.setItem("rag-user-id", userId.current); } catch {}
       }
-      const document = await buildDocument(file, userId.current, source, controller.signal);
+      await buildDocument(file, userId.current, source, controller.signal);
+      window.history.pushState(null, '', `/${userId.current}`)
       if (!controller.signal.aborted) {
         setText("");
         setPdf(null);
-        onReady(document);
+        onReady(userId.current);
       }
     } catch (failure) {
       if (!controller.signal.aborted) setError(getErrorMessage(failure));
@@ -133,14 +134,14 @@ export function DocumentSetup({ onReady }: { onReady: (document: DocumentContext
         <textarea id="document-text" value={text} maxLength={MAX_DOCUMENT_BYTES} disabled={busy} aria-describedby="text-limits text-count" onChange={(event) => {
           const value = event.target.value;
           if (value.length > MAX_DOCUMENT_BYTES || measureText(value).bytes > MAX_DOCUMENT_BYTES) {
-            setError("Custom text cannot exceed 1 MiB.");
+            setError(`Custom text cannot exceed ${MAX_DOCUMENT_SIZE_LABEL}.`);
             return;
           }
           setError("");
           setText(value);
         }} />
         <div className={styles.limits}>
-          <span id="text-limits">100 lines minimum / 1 MiB maximum</span>
+          <span id="text-limits">{MIN_CUSTOM_TEXT_LINES} lines minimum / {MAX_DOCUMENT_SIZE_LABEL} maximum</span>
           <span id="text-count">{stats.lines} lines / {(stats.bytes / 1024).toFixed(1)} KiB</span>
         </div>
         <button className={styles.build} type="submit" disabled={busy || !validText}><span>Start chatting</span><ArrowRight size={16} aria-hidden="true" /></button>
@@ -157,13 +158,13 @@ export function DocumentSetup({ onReady }: { onReady: (document: DocumentContext
           setError("");
           if (!file) return;
           if (!/\.pdf$/i.test(file.name) || !file.size || file.size > MAX_DOCUMENT_BYTES) {
-            setError("Choose a nonempty PDF no larger than 1 MiB.");
+            setError(`Choose a nonempty PDF no larger than ${MAX_DOCUMENT_SIZE_LABEL}.`);
             event.target.value = "";
             return;
           }
           setPdf(file);
         }} />
-        <p className={styles.limits} id="pdf-limits">1 MiB maximum / 100 pages maximum / text-based PDF</p>
+        <p className={styles.limits} id="pdf-limits">{MAX_DOCUMENT_SIZE_LABEL} maximum / {MAX_PDF_PAGES} pages maximum / text-based PDF</p>
         <a className={styles.sampleDownload} href="/samples/solar-system.pdf" download="solar-system.pdf"><Download size={16} aria-hidden="true" /><span>Download sample PDF</span></a>
         {pdf && <p className={styles.selectedFile}>{pdf.name} / {(pdf.size / 1024).toFixed(1)} KiB</p>}
         <button className={styles.build} type="submit" disabled={busy || !pdf}><span>Start chatting</span><ArrowRight size={16} aria-hidden="true" /></button>
@@ -193,6 +194,22 @@ export function DocumentSetup({ onReady }: { onReady: (document: DocumentContext
 
       {busy && <p className={styles.progress} role="status"><LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /><span>Preparing {buildingName} for chat...</span></p>}
       {error && <p className={styles.error} role="alert">{error}</p>}
+
+      <article className={styles.explainer} aria-labelledby="rag-heading">
+        <h2 id="rag-heading">What is retrieval-augmented generation (RAG)?</h2>
+        <p>Retrieval-augmented generation, or RAG, combines information retrieval with a large language model. Instead of relying only on its training data, the model receives relevant passages from a document alongside a question. Those passages provide context for a document-grounded answer.</p>
+
+        <h3>How does document retrieval work?</h3>
+        <p>A RAG pipeline extracts text, splits it into smaller passages called chunks, and converts those chunks into numerical embeddings. A vector search compares the question with the stored embeddings to find related passages. The language model then generates an answer using the retrieved context. Retrieval quality depends on the document, chunk boundaries, embedding model, and search settings.</p>
+
+        <h3>How is RAG different from fine-tuning?</h3>
+        <p>RAG supplies reference material at query time without changing the model&apos;s weights. Fine-tuning changes model weights through additional training, often to adapt behavior, style, or task performance. The two approaches can complement each other. For questions about a changing collection of documents, retrieval makes it possible to update the reference material separately from the model.</p>
+
+        <h3>Can document chat give incorrect answers?</h3>
+        <p>Yes. Retrieval can miss important context, and a language model can misinterpret a passage or produce unsupported claims. Scanned PDFs also need optical character recognition before their text can be retrieved. Compare important answers with the original document; a fluent response is not proof of accuracy.</p>
+
+        <p className={styles.reference}>Further reading: <a href="https://arxiv.org/abs/2005.11401">Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks</a>, the research paper introducing the RAG approach.</p>
+      </article>
     </section>
   );
 }
